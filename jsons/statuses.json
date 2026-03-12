@@ -1,0 +1,47 @@
+{
+  "burn": {
+    "name": "Burn",
+    "icon": "🔥",
+    "type": "dot",
+    "duration": 2,
+    "stacking": "stack",
+    "max_stacks": 3,
+    "potency": 4
+  },
+  "freeze": {
+    "name": "Freeze",
+    "icon": "❄",
+    "type": "skip",
+    "duration": 2,
+    "stacking": "refresh",
+    "max_stacks": 1,
+    "chance": 0.35
+  },
+  "poison": {
+    "name": "Poison",
+    "icon": "☠",
+    "type": "ramp_dot",
+    "duration": 3,
+    "stacking": "stack",
+    "max_stacks": 5,
+    "base": 1,
+    "ramp_per_turn": 1
+  },
+  "shield": {
+    "name": "Shield",
+    "icon": "🛡",
+    "type": "shield",
+    "duration": 1,
+    "stacking": "refresh",
+    "max_stacks": 1,
+    "incoming_mult": 0.6
+  },
+  "charge": {
+    "name": "Charge",
+    "icon": "⚡",
+    "type": "charge",
+    "duration": 1,
+    "stacking": "refresh",
+    "max_stacks": 1
+  }
+}

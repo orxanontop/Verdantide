@@ -1,0 +1,37 @@
+[
+    {
+        "element": "Fire",
+        "advantages": {
+            "strong_against": ["Ice"],
+            "weak_against": ["Water"]
+        }
+    },
+    {
+        "element": "Water",
+        "advantages": {
+            "strong_against": ["Fire"],
+            "weak_against": ["Earth"]
+        }
+    },
+    {
+        "element": "Earth",
+        "advantages": {
+            "strong_against": ["Water"],
+            "weak_against": ["Air"]
+        }
+    },
+    {
+        "element": "Air",
+        "advantages": {
+            "strong_against": ["Earth"],
+            "weak_against": ["Fire"]
+        }
+    },
+    {
+        "element": "Ice",
+        "advantages": {
+            "strong_against": ["Air"],
+            "weak_against": ["Fire"]
+        }
+    }
+]

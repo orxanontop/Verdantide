@@ -1,0 +1,15 @@
+[
+    {
+        "class": "Ninja"
+    },
+
+    {
+        "class": "Knight"
+    },
+    {
+        "class": "Mage"
+    },
+    {
+        "class": "Archer"
+    }
+]

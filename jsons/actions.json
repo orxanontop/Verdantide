@@ -1,0 +1,71 @@
+[
+  {
+    "action": "Shadow-Step Heist",
+    "description": "Steal a valuable artifact from a heavily guarded museum using stealth and cunning.",
+    "difficulty": "Hard",
+    "reward": "Rare Artifact"
+  },
+
+  {
+    "action": "Ember Swap",
+    "description": "Trade fire-based items with another player to gain new abilities.",
+    "difficulty": "Medium",
+    "reward": "New Fire Ability"
+  },
+
+  {
+    "action": "Memory Thread",
+    "description": "Yank a 10-second memory out of a foes head as a glowing silk ribbon; wear it as a scarf to gain their skill bonus until it frays at sunrise.",
+    "difficulty": "Easy",
+    "reward": "Enhanced Memory"
+  },
+
+  {
+    "action": "Mirror Mend",
+    "description": "Shatter a reflective surface; each shard flies to a wounded ally, sealing cuts with quicksilver scars that grant +1 AC but echo enemy voices.",
+    "difficulty": "Medium",
+    "reward": "Increased Armor Class"
+  },
+
+  {
+    "action": "Thunderclap Charge",
+    "description": "Channel storm energy into your weapon for a single strike that deals extra lightning damage and may stun the target.",
+    "difficulty": "Hard",
+    "reward": "Stunning Strike"
+  },
+
+  {
+    "action": "Borrowed Backbone",
+    "description": "Temporarily gain the resilience of a nearby ally, increasing your health",
+    "difficulty": "Medium",
+    "reward": "Increased Health"
+  },
+
+  {
+    "action": "Starfall Volley",
+    "description": "Call down a brief meteor shower that peppers a small area with radiant damage, risking friendly fire for massive payoff.",
+    "difficulty": "Hard",
+    "reward": "Meteoric Burst Technique"
+  },
+
+  {
+    "action": "Temporal Rewind",
+    "description": "Spin your pocket watch charm and rewind your last 6 seconds, undoing your wounds but also resetting your position.",
+    "difficulty": "Hard",
+    "reward": "Second-Chance Amulet"
+  },
+
+  {
+    "action": "Phantom Mirage",
+    "description": "Split into three afterimages that confuse enemies; for one round, attacks against you have disadvantage.",
+    "difficulty": "Medium",
+    "reward": "Illusionist's Veil"
+  },
+
+  {
+    "action": "Gaia's Grasp",
+    "description": "Roots erupt from the ground, restraining foes and slowly draining their stamina into the land.",
+    "difficulty": "Medium",
+    "reward": "Druidic Ward"
+  }
+]

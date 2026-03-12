@@ -1,0 +1,15 @@
+{
+  "elements": {
+    "Fire": {"icon": "🔥", "color": "#ff6b5a"},
+    "Ice": {"icon": "❄", "color": "#5ad6ff"},
+    "Wind": {"icon": "🌀", "color": "#7dffb2"},
+    "Neutral": {"icon": "◇", "color": "#c9c9d6"}
+  },
+  "triangle": [
+    {"attacker": "Fire", "defender": "Ice"},
+    {"attacker": "Ice", "defender": "Wind"},
+    {"attacker": "Wind", "defender": "Fire"}
+  ],
+  "multipliers": {"super": 1.5, "resisted": 0.5, "neutral": 1.0},
+  "labels": {"super": "Super Effective", "resisted": "Resisted"}
+}

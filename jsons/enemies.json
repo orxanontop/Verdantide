@@ -1,0 +1,66 @@
+[
+  {
+    "name": "Goblin Raider",
+    "class": "Rogue",
+    "element": "Earth",
+    "hp": 70,
+    "attack_min": 6,
+    "attack_max": 12,
+    "heavy_min": 12,
+    "heavy_max": 18,
+    "heal_min": 5,
+    "heal_max": 10
+  },
+
+  {
+    "name": "Flame Disciple",
+    "class": "Mage",
+    "element": "Fire",
+    "hp": 80,
+    "attack_min": 8,
+    "attack_max": 14,
+    "heavy_min": 14,
+    "heavy_max": 22,
+    "heal_min": 6,
+    "heal_max": 12
+  },
+
+  {
+    "name": "Tidal Knight",
+    "class": "Paladin",
+    "element": "Water",
+    "hp": 100,
+    "attack_min": 7,
+    "attack_max": 13,
+    "heavy_min": 16,
+    "heavy_max": 24,
+    "heal_min": 10,
+    "heal_max": 18
+  },
+
+  {
+    "name": "Skyblade Duelist",
+    "class": "Swordsman",
+    "element": "Air",
+    "hp": 85,
+    "attack_min": 9,
+    "attack_max": 16,
+    "heavy_min": 18,
+    "heavy_max": 26,
+    "heal_min": 4,
+    "heal_max": 9
+  },
+
+  {
+    "name": "Frost Warden",
+    "class": "Guardian",
+    "element": "Ice",
+    "hp": 110,
+    "attack_min": 6,
+    "attack_max": 11,
+    "heavy_min": 14,
+    "heavy_max": 20,
+    "heal_min": 8,
+    "heal_max": 16
+  }
+]

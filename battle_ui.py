@@ -1,0 +1,1334 @@
+from __future__ import annotations
+
+"""battle_ui.py
+
+Modern layered Tkinter battle UI for the data-driven combat engine.
+
+Visual layers:
+- Background: forest arena + subtle particles
+- Character: left/right sprites with idle/attack/hit/defeat reactions
+- Interface: enemy top panel, initiative timeline, player bottom panel + command bar, combat log
+
+This module renders state and plays micro-animations. Core rules live in battle_engine.py.
+"""
+
+import math
+import time
+import tkinter as tk
+from dataclasses import dataclass
+from pathlib import Path
+from tkinter import ttk
+
+from animation_system import AnimationController
+from battle_engine import Action, BattleEngine, CombatEvent, Content
+from character_system import Combatant, Resource
+
+
+# -----------------------------
+# Small UI helpers / primitives
+# -----------------------------
+
+def _hex_to_rgb(h: str) -> tuple[int, int, int]:
+    h = h.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
+    r, g, b = rgb
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _lerp(a: float, b: float, t: float) -> float:
+    return a + (b - a) * t
+
+
+def _mix(c1: str, c2: str, t: float) -> str:
+    r1, g1, b1 = _hex_to_rgb(c1)
+    r2, g2, b2 = _hex_to_rgb(c2)
+    return _rgb_to_hex((int(_lerp(r1, r2, t)), int(_lerp(g1, g2, t)), int(_lerp(b1, b2, t))))
+
+
+def _hp_color(ratio: float) -> str:
+    ratio = max(0.0, min(1.0, ratio))
+    if ratio >= 0.55:
+        return _mix("#ffcd4a", "#49ff9a", (ratio - 0.55) / 0.45)
+    if ratio >= 0.25:
+        return _mix("#ff4d4d", "#ffcd4a", (ratio - 0.25) / 0.30)
+    return "#ff4d4d"
+
+
+def _round_rect_points(x1: int, y1: int, x2: int, y2: int, r: int) -> list[int]:
+    r = max(0, int(r))
+    return [
+        x1 + r,
+        y1,
+        x2 - r,
+        y1,
+        x2,
+        y1,
+        x2,
+        y1 + r,
+        x2,
+        y2 - r,
+        x2,
+        y2,
+        x2 - r,
+        y2,
+        x1 + r,
+        y2,
+        x1,
+        y2,
+        x1,
+        y2 - r,
+        x1,
+        y1 + r,
+        x1,
+        y1,
+    ]
+
+
+def _round_rect(canvas: tk.Canvas, x1: int, y1: int, x2: int, y2: int, r: int, **kw) -> int:
+    return canvas.create_polygon(_round_rect_points(x1, y1, x2, y2, r), smooth=True, **kw)
+
+
+class AnimatedBar:
+    """Resource bar with optional HP chip (delayed drain) for modern readability."""
+
+    def __init__(self, canvas: tk.Canvas, x: int, y: int, w: int, h: int, *, chip: bool = False):
+        self._c = canvas
+        self._x = int(x)
+        self._y = int(y)
+        self._w = int(w)
+        self._h = int(h)
+
+        self._ratio = 1.0
+        self._target = 1.0
+
+        self._chip_enabled = bool(chip)
+        self._chip_ratio = 1.0
+        self._chip_target = 1.0
+
+        self._bg = _round_rect(canvas, x, y, x + w, y + h, 8, fill="#1b2030", outline="#242b3d")
+        self._chip = None
+        if self._chip_enabled:
+            self._chip = _round_rect(canvas, x + 2, y + 2, x + w - 2, y + h - 2, 7, fill="#b91c1c", outline="")
+        self._fill = _round_rect(canvas, x + 2, y + 2, x + w - 2, y + h - 2, 7, fill=_hp_color(1.0), outline="")
+        self._shine = canvas.create_rectangle(x + 6, y + 4, x + w - 6, y + 6, fill="#ffffff", outline="", stipple="gray75")
+
+    def set_ratio_immediate(self, ratio: float, *, hp_style: bool = True) -> None:
+        self._ratio = max(0.0, min(1.0, float(ratio)))
+        self._target = self._ratio
+        if self._chip_enabled:
+            self._chip_ratio = self._ratio
+            self._chip_target = self._ratio
+        self._redraw(hp_style=hp_style)
+
+    def set_target_ratio(self, ratio: float) -> None:
+        r = max(0.0, min(1.0, float(ratio)))
+        self._target = r
+        if not self._chip_enabled:
+            return
+        if r >= self._ratio:
+            self._chip_ratio = r
+            self._chip_target = r
+        else:
+            self._chip_target = r
+
+    def step(self, t: float, *, hp_style: bool = True) -> None:
+        self._ratio = _lerp(self._ratio, self._target, t)
+        if self._chip_enabled:
+            chip_t = max(0.0, min(1.0, t * 0.38))
+            self._chip_ratio = _lerp(self._chip_ratio, self._chip_target, chip_t)
+        self._redraw(hp_style=hp_style)
+
+    def _redraw(self, *, hp_style: bool) -> None:
+        x1 = self._x + 2
+        y1 = self._y + 2
+        y2 = self._y + self._h - 2
+
+        inner_w = max(0, int((self._w - 4) * self._ratio))
+        chip_w = max(0, int((self._w - 4) * self._chip_ratio)) if self._chip_enabled else 0
+
+        x2 = x1 + inner_w
+        cx2 = x1 + chip_w
+
+        if self._chip is not None:
+            if chip_w <= 4:
+                self._c.itemconfigure(self._chip, state="hidden")
+            else:
+                self._c.itemconfigure(self._chip, state="normal")
+                self._c.coords(self._chip, *_round_rect_points(x1, y1, cx2, y2, 7))
+
+        if inner_w <= 4:
+            self._c.itemconfigure(self._fill, state="hidden")
+            self._c.itemconfigure(self._shine, state="hidden")
+            return
+
+        self._c.itemconfigure(self._fill, state="normal")
+        self._c.itemconfigure(self._shine, state="normal")
+        self._c.coords(self._fill, *_round_rect_points(x1, y1, x2, y2, 7))
+        fill = _hp_color(self._ratio) if hp_style else "#60a5fa"
+        self._c.itemconfigure(self._fill, fill=fill)
+        self._c.coords(self._shine, x1 + 4, y1 + 2, x2 - 4, y1 + 4)
+
+
+class CombatLog(tk.Frame):
+    """Stylized event feed with fade-in and turn separators."""
+
+    def __init__(self, parent: tk.Widget, *, bg: str):
+        super().__init__(parent, bg=bg)
+        self._text = tk.Text(
+            self,
+            height=7,
+            wrap="word",
+            bg=bg,
+            fg="#d9deea",
+            insertbackground="#d9deea",
+            relief="flat",
+            highlightthickness=1,
+            highlightbackground="#20283a",
+        )
+        self._scroll = ttk.Scrollbar(self, orient="vertical", command=self._text.yview)
+        self._text.configure(yscrollcommand=self._scroll.set)
+
+        self._text.pack(side="left", fill="both", expand=True)
+        self._scroll.pack(side="right", fill="y")
+
+        self._text.tag_configure("turn", foreground="#a5b4fc")
+        self._text.tag_configure("player", foreground="#7dd3fc")
+        self._text.tag_configure("enemy", foreground="#fb7185")
+        self._text.tag_configure("system", foreground="#b0b8ca")
+
+        self._text.configure(state="disabled")
+
+    _line_id = 0
+
+    def _tag_color(self, tag: str) -> str:
+        return {
+            "turn": "#a5b4fc",
+            "player": "#7dd3fc",
+            "enemy": "#fb7185",
+            "system": "#b0b8ca",
+        }.get(tag, "#b0b8ca")
+
+    def line(self, msg: str, *, tag: str = "system") -> None:
+        self._text.configure(state="normal")
+
+        ts = time.strftime("%H:%M")
+        if tag == "turn":
+            self._text.insert("end", "\n", ("system",))
+            self._text.insert("end", "— " * 14 + "\n", ("system",))
+
+        self._text.insert("end", f"[{ts}] ", ("system",))
+
+        msg_start = self._text.index("end-1c")
+        self._text.insert("end", msg + "\n")
+        msg_end = self._text.index("end-1c")
+
+        CombatLog._line_id += 1
+        line_tag = f"fade_{CombatLog._line_id}"
+        self._text.tag_add(line_tag, msg_start, msg_end)
+
+        final = self._tag_color(tag)
+        self._text.tag_configure(line_tag, foreground="#6b7280")
+
+        def step(color: str):
+            try:
+                self._text.tag_configure(line_tag, foreground=color)
+            except Exception:
+                pass
+
+        self.after(60, lambda: step(_mix("#6b7280", final, 0.55)))
+        self.after(120, lambda: step(_mix("#6b7280", final, 0.80)))
+        self.after(180, lambda: step(final))
+
+        self._text.see("end")
+        self._text.configure(state="disabled")
+
+
+class Tooltip:
+    """Tiny tooltip helper for skill descriptions."""
+
+    def __init__(self, widget: tk.Widget, *, bg: str = "#111827", fg: str = "#e5e7eb"):
+        self._w = widget
+        self._tip: tk.Toplevel | None = None
+        self._bg = bg
+        self._fg = fg
+
+    def show(self, text: str, x: int, y: int) -> None:
+        self.hide()
+        tip = tk.Toplevel(self._w)
+        tip.wm_overrideredirect(True)
+        tip.configure(bg=self._bg)
+        lbl = tk.Label(tip, text=text, bg=self._bg, fg=self._fg, font=("Segoe UI", 10), justify="left", padx=10, pady=8)
+        lbl.pack()
+        tip.wm_geometry(f"+{x}+{y}")
+        self._tip = tip
+
+    def hide(self) -> None:
+        if self._tip is not None:
+            try:
+                self._tip.destroy()
+            except Exception:
+                pass
+        self._tip = None
+
+
+class ActionButton(tk.Button):
+    """Command button with hover glow, click feedback, and disabled-state styling."""
+
+    def __init__(self, parent, *, icon: str, text: str, command, theme: dict[str, str], hint: str = "", on_hint=None, shortcut: str = ""):
+        label = f"{icon}  {text}"
+        if shortcut:
+            label = f"{label}  [{shortcut}]"
+
+        super().__init__(
+            parent,
+            text=label,
+            command=command,
+            font=("Segoe UI", 11, "bold"),
+            bd=0,
+            relief="flat",
+            padx=14,
+            pady=10,
+            bg=theme["btn"],
+            fg=theme["btn_fg"],
+            activebackground=theme["btn_active"],
+            activeforeground=theme["btn_fg"],
+            disabledforeground=theme.get("btn_disabled_fg", "#6b7280"),
+            highlightthickness=1,
+            highlightbackground=theme["btn_border"],
+            cursor="hand2",
+        )
+        self._theme = theme
+        self._hint = hint or ""
+        self._on_hint = on_hint
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+
+    def _on_enter(self, _evt=None):
+        if str(self["state"]) != "disabled":
+            self.configure(bg=self._theme["btn_hover"], highlightbackground=self._theme["btn_glow"])
+        if self._on_hint and self._hint:
+            try:
+                self._on_hint(self._hint)
+            except Exception:
+                pass
+
+    def _on_leave(self, _evt=None):
+        self.configure(bg=self._theme["btn"], highlightbackground=self._theme["btn_border"])
+        if self._on_hint:
+            try:
+                self._on_hint("")
+            except Exception:
+                pass
+# -----------------------------
+# Interface widgets
+# -----------------------------
+
+
+class UnitPanel(tk.Canvas):
+    """Top/bottom status panel for a combatant (portrait, bars, statuses)."""
+
+    _STATUS_COLORS = {
+        "burn": "#fb923c",
+        "freeze": "#60a5fa",
+        "poison": "#a78bfa",
+        "shield": "#5eead4",
+        "charge": "#fbbf24",
+    }
+
+    def __init__(self, parent, *, theme: dict[str, str], content: Content, width: int, height: int, portrait: bool):
+        super().__init__(parent, width=width, height=height, bg=theme["bg"], highlightthickness=0)
+        self._theme = theme
+        self._content = content
+        self._panel_w = int(width)
+        self._panel_h = int(height)
+        self._portrait_enabled = bool(portrait)
+
+        # panel
+        _round_rect(self, 8, 10, width - 8, height - 6, 18, fill="#000000", outline="", stipple="gray50")
+        _round_rect(self, 4, 6, width - 12, height - 10, 18, fill=theme["panel"], outline=theme["panel_border"], width=2)
+
+        px = 18
+        if self._portrait_enabled:
+            _round_rect(self, 18, 18, 78, 78, 12, fill="#0f172a", outline="#22304f")
+            self._portrait_icon = self.create_text(48, 48, text="◼", fill=theme["muted"], font=("Segoe UI", 16, "bold"))
+            px = 90
+        else:
+            self._portrait_icon = None
+
+        self._name_id = self.create_text(px, 26, text="", anchor="w", fill=theme["txt"], font=("Segoe UI", 12, "bold"))
+
+        self._elem_circle = self.create_oval(width - 54, 16, width - 24, 46, fill="#c9c9d6", outline="#0f172a", width=2)
+        self._elem_icon = self.create_text(width - 39, 31, text="◇", fill="#0b0f17", font=("Segoe UI", 11, "bold"))
+
+        # bars
+        self._hp_text = self.create_text(px, 52, text="", anchor="w", fill=theme["muted"], font=("Segoe UI", 9, "bold"))
+        self._sp_text = self.create_text(px, 80, text="", anchor="w", fill=theme["muted"], font=("Segoe UI", 9, "bold"))
+
+        self.hp_bar = AnimatedBar(self, px, 60, width - px - 24, 14, chip=True)
+        self.sp_bar = AnimatedBar(self, px, 88, width - px - 24, 10, chip=False)
+
+        self._status_ids: list[int] = []
+
+    def update_from_unit(self, unit: Combatant, *, immediate: bool) -> None:
+        e = self._content.elements.normalize(unit.element)
+        self.itemconfigure(self._name_id, text=unit.name)
+
+        self.itemconfigure(self._elem_circle, fill=self._content.elements.color(e))
+        self.itemconfigure(self._elem_icon, text=self._content.elements.icon(e))
+
+        if self._portrait_icon is not None:
+            # portrait is a placeholder; use the element icon for now.
+            self.itemconfigure(self._portrait_icon, text=self._content.elements.icon(e))
+
+        self.itemconfigure(self._hp_text, text=f"HP {unit.hp.current}/{unit.hp.maximum}")
+        self.itemconfigure(self._sp_text, text=f"SP {unit.sp.current}/{unit.sp.maximum}")
+
+        if immediate:
+            self.hp_bar.set_ratio_immediate(unit.hp.ratio(), hp_style=True)
+            self.sp_bar.set_ratio_immediate(unit.sp.ratio(), hp_style=False)
+        else:
+            self.hp_bar.set_target_ratio(unit.hp.ratio())
+            self.sp_bar.set_target_ratio(unit.sp.ratio())
+
+        for i in self._status_ids:
+            self.delete(i)
+        self._status_ids.clear()
+
+        x = 18
+        y = self._panel_h - 26
+        for sid, inst in unit.statuses.items():
+            if not inst.alive():
+                continue
+            badge = f"{inst.defn.icon}{inst.turns_left}"
+            col = self._STATUS_COLORS.get(sid, "#fbbf24")
+            rect = self.create_rectangle(x, y, x + 40, y + 16, fill="#0f172a", outline="#22304f")
+            txt = self.create_text(x + 20, y + 8, text=badge, fill=col, font=("Segoe UI", 8, "bold"))
+            self._status_ids.extend([rect, txt])
+            x += 46
+
+
+class InitiativeBar(tk.Canvas):
+    """Horizontal turn order preview (CTB timeline)."""
+
+    def __init__(self, parent, *, theme: dict[str, str], width: int = 420, height: int = 42):
+        super().__init__(parent, width=width, height=height, bg=theme["bg"], highlightthickness=0)
+        self._theme = theme
+
+    def render(self, engine: BattleEngine, *, count: int = 10) -> None:
+        self.delete("all")
+        q = engine.upcoming_turns(count)
+        active = engine.active_id
+
+        x = 10
+        for i, uid in enumerate(q):
+            u = engine.get(uid)
+            is_active = i == 0 and uid == active
+            ring = "#fbbf24" if is_active else "#263455"
+            fill = "#111827" if is_active else "#0f172a"
+            self.create_oval(x, 8, x + 28, 36, fill=fill, outline=ring, width=(2 if is_active else 1))
+            ch = "P" if u.team == "player" else "E"
+            col = "#60a5fa" if u.team == "player" else "#fb7185"
+            self.create_text(x + 14, 22, text=ch, fill=col, font=("Segoe UI", 11, "bold"))
+            x += 36
+# -----------------------------
+# Battle scene
+# -----------------------------
+
+
+class BattleUI(ttk.Frame):
+    """Modern battle interface wired to the scalable data-driven combat engine."""
+
+    def __init__(self, parent: tk.Widget):
+        super().__init__(parent)
+
+        self.theme = {
+            "bg": "#0b0f17",
+            "panel": "#101626",
+            "panel2": "#0f1524",
+            "panel_border": "#1f2a3f",
+            "txt": "#d9deea",
+            "muted": "#9aa6be",
+            "btn": "#141c2f",
+            "btn_hover": "#18233a",
+            "btn_active": "#1b2a46",
+            "btn_border": "#263455",
+            "btn_glow": "#5eead4",
+            "btn_fg": "#e5e7eb",
+            "btn_disabled_fg": "#6b7280",
+        }
+
+        self.content = Content.load(Path("jsons"))
+        self.engine = BattleEngine(content=self.content)
+        self.anim = AnimationController(self)
+
+        self._busy = False
+        self._shortcuts_bound = False
+
+        # Arena sprite ids + anchors
+        self._player_anchor = (220, 230)
+        self._enemy_anchor = (540, 220)
+        self._player_sprite: int | None = None
+        self._enemy_sprite: int | None = None
+
+        # particle state
+        self._particles: list[int] = []
+        self._particle_job: str | None = None
+        self._idle_job: str | None = None
+
+        self._build_styles(parent)
+        self._build_layout()
+
+    def _build_styles(self, root):
+        style = ttk.Style(root)
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+        style.configure("Battle.TFrame", background=self.theme["bg"])
+        style.configure("BattleTitle.TLabel", background=self.theme["bg"], foreground="#fbbf24", font=("Segoe UI", 16, "bold"))
+
+    def _build_layout(self) -> None:
+        self.configure(style="Battle.TFrame")
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(1, weight=1)
+
+        # TOP: enemy panel + timeline
+        top = ttk.Frame(self, style="Battle.TFrame")
+        top.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 10))
+        top.columnconfigure(1, weight=1)
+
+        ttk.Label(top, text="BATTLE", style="BattleTitle.TLabel").grid(row=0, column=0, sticky="w")
+
+        self.enemy_panel = UnitPanel(top, theme=self.theme, content=self.content, width=420, height=108, portrait=False)
+        self.enemy_panel.grid(row=1, column=0, sticky="w", pady=(10, 0))
+
+        self.timeline = InitiativeBar(top, theme=self.theme, width=420, height=42)
+        self.timeline.grid(row=1, column=1, sticky="e", padx=(10, 0), pady=(10, 0))
+
+        # MID: arena
+        self.arena = tk.Canvas(
+            self,
+            width=900,
+            height=380,
+            bg=self.theme["bg"],
+            highlightthickness=1,
+            highlightbackground=self.theme["panel_border"],
+            relief="flat",
+        )
+        self.arena.grid(row=1, column=0, sticky="nsew", padx=16)
+
+        # BOTTOM: log + player panel + command bar
+        bottom = ttk.Frame(self, style="Battle.TFrame")
+        bottom.grid(row=2, column=0, sticky="ew", padx=16, pady=(10, 16))
+        bottom.columnconfigure(0, weight=1)
+
+        self.log = CombatLog(bottom, bg=self.theme["panel2"])
+        self.log.grid(row=0, column=0, sticky="ew")
+
+        self.player_panel = UnitPanel(bottom, theme=self.theme, content=self.content, width=520, height=118, portrait=True)
+        self.player_panel.grid(row=1, column=0, sticky="w", pady=(10, 0))
+
+        self.hint = tk.Label(bottom, text="", bg=self.theme["bg"], fg=self.theme["muted"], font=("Segoe UI", 10, "bold"), anchor="w")
+        self.hint.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+
+        self.action_bar = tk.Frame(bottom, bg=self.theme["bg"])
+        self.action_bar.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        for i in range(4):
+            self.action_bar.columnconfigure(i, weight=1)
+
+        self.btn_attack = ActionButton(
+            self.action_bar,
+            icon="⚔",
+            text="Attack",
+            command=lambda: self._on_action(Action(kind="attack")),
+            theme=self.theme,
+            hint="Attack: fast, reliable damage.",
+            on_hint=self._set_hint,
+            shortcut="1",
+        )
+        self.btn_skill = ActionButton(
+            self.action_bar,
+            icon="✦",
+            text="Skill",
+            command=self._open_skill_menu,
+            theme=self.theme,
+            hint="Skill: costs SP, may apply statuses, can have cooldowns.",
+            on_hint=self._set_hint,
+            shortcut="2",
+        )
+        self.btn_defend = ActionButton(
+            self.action_bar,
+            icon="🛡",
+            text="Defend",
+            command=lambda: self._on_action(Action(kind="defend")),
+            theme=self.theme,
+            hint="Defend: apply a short Shield (reduces next hit).",
+            on_hint=self._set_hint,
+            shortcut="3",
+        )
+        self.btn_item = ActionButton(
+            self.action_bar,
+            icon="☉",
+            text="Item",
+            command=self._open_item_menu,
+            theme=self.theme,
+            hint="Item: limited-use utility.",
+            on_hint=self._set_hint,
+            shortcut="4",
+        )
+
+        self.btn_attack.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        self.btn_skill.grid(row=0, column=1, sticky="ew", padx=10)
+        self.btn_defend.grid(row=0, column=2, sticky="ew", padx=10)
+        self.btn_item.grid(row=0, column=3, sticky="ew", padx=(10, 0))
+
+        # Overlay row for submenus (skills/items)
+        self.menu_overlay = tk.Frame(bottom, bg=self.theme["bg"])
+        self.menu_overlay.grid(row=4, column=0, sticky="ew")
+        self.menu_overlay.columnconfigure(0, weight=1)
+
+        self.skill_menu: tk.Frame | None = None
+        self.item_menu: tk.Frame | None = None
+        self._tooltip = Tooltip(self)
+
+        self._draw_arena_background()
+        self._spawn_particles()
+
+    # -----------------------------
+    # Battle start / wiring
+    # -----------------------------
+
+    def start_battle(self, player: Combatant, enemy: Combatant) -> None:
+        """Initialize a new encounter."""
+        self.engine.new_battle([player, enemy])
+        self._draw_sprites()
+        self._refresh_panels(immediate=True)
+        self._refresh_timeline()
+        self._set_controls_enabled(self.engine.active_id == "player")
+        self.log.line("A foe emerges from the forest.", tag="turn")
+        self._announce_turn()
+        self._bind_shortcuts_once()
+
+    def _bind_shortcuts_once(self) -> None:
+        if self._shortcuts_bound:
+            return
+        self._shortcuts_bound = True
+        root = self.winfo_toplevel()
+
+        def on_key(e):
+            if self._busy or self.engine.is_over():
+                return
+            k = (e.keysym or "").lower()
+
+            # When a submenu is open, prevent accidental actions.
+            if self.skill_menu is not None or self.item_menu is not None:
+                if k in ("escape",):
+                    self._close_menus()
+                    return "break"
+                return "break"
+
+            if k in ("1", "kp_1"):
+                self._on_action(Action(kind="attack"))
+                return "break"
+            if k in ("2", "kp_2"):
+                self._open_skill_menu()
+                return "break"
+            if k in ("3", "kp_3"):
+                self._on_action(Action(kind="defend"))
+                return "break"
+            if k in ("4", "kp_4"):
+                self._open_item_menu()
+                return "break"
+            if k in ("escape",):
+                self._close_menus()
+                return "break"
+
+        root.bind("<Key>", on_key)
+
+    # -----------------------------
+    # UI refresh
+    # -----------------------------
+
+    def _set_hint(self, text: str) -> None:
+        try:
+            self.hint.configure(text=text or "")
+        except Exception:
+            pass
+
+    def _refresh_panels(self, *, immediate: bool) -> None:
+        if not self.engine.units:
+            return
+        p = self.engine.get("player")
+        e = self.engine.get("enemy")
+        self.player_panel.update_from_unit(p, immediate=immediate)
+        self.enemy_panel.update_from_unit(e, immediate=immediate)
+
+    def _refresh_timeline(self) -> None:
+        self.timeline.render(self.engine, count=10)
+
+    def _set_controls_enabled(self, enabled: bool) -> None:
+        state = "normal" if enabled else "disabled"
+        for b in (self.btn_attack, self.btn_skill, self.btn_defend, self.btn_item):
+            b.configure(state=state)
+
+    def _announce_turn(self) -> None:
+        if self.engine.is_over():
+            self._set_controls_enabled(False)
+            return
+        if self.engine.active_id == "player":
+            if self.engine.get("player").has("charge"):
+                self.log.line("Charge ready: Heavy Strike will trigger.", tag="turn")
+            else:
+                self.log.line("Your move.", tag="turn")
+        else:
+            self.log.line("Enemy acts...", tag="turn")
+
+    # -----------------------------
+    # Background / ambience
+    # -----------------------------
+
+    def _draw_arena_background(self) -> None:
+        c = self.arena
+        c.delete("bg")
+        w = int(c["width"])
+        h = int(c["height"])
+
+        top = "#07101a"
+        mid = "#0b1a16"
+        bot = self.theme["bg"]
+        for i in range(24):
+            t = i / 23
+            col = _mix(top, mid, min(1.0, t * 1.2))
+            y1 = int(h * t)
+            y2 = int(h * (t + 1 / 24))
+            c.create_rectangle(0, y1, w, y2, fill=col, outline="", tags=("bg",))
+
+        c.create_rectangle(0, int(h * 0.62), w, h, fill=_mix(mid, bot, 0.55), outline="", tags=("bg",))
+
+        # Light shafts (stipple bitmaps must be valid on Windows Tk)
+        for i in range(6):
+            x = 40 + i * 150
+            c.create_polygon(
+                x,
+                0,
+                x + 80,
+                0,
+                x + 260,
+                h,
+                x + 170,
+                h,
+                fill="#ffffff",
+                outline="",
+                stipple="gray75",
+                tags=("bg",),
+            )
+
+        # Mist bokeh
+        for i in range(14):
+            r = 18 + (i % 5) * 10
+            x = 90 + (i * 63) % (w - 90)
+            y = 40 + ((i * 37) % int(h * 0.55))
+            c.create_oval(x - r, y - r, x + r, y + r, fill="#ffffff", outline="", stipple="gray75", tags=("bg",))
+
+        c.create_oval(-120, int(h * 0.58), w + 120, h + 120, fill="#000000", outline="", stipple="gray50", tags=("bg",))
+
+    def _spawn_particles(self) -> None:
+        c = self.arena
+        c.delete("particle")
+        self._particles.clear()
+        w = int(c["width"])
+        h = int(c["height"])
+
+        # subtle ambience particles
+        for i in range(20):
+            r = 2 + (i % 3)
+            x = 40 + (i * 43) % (w - 80)
+            y = int(h * 0.15) + (i * 29) % int(h * 0.55)
+            p = c.create_oval(x - r, y - r, x + r, y + r, fill="#ffffff", outline="", stipple="gray75", tags=("particle",))
+            self._particles.append(p)
+
+        def tick():
+            if not self.winfo_exists():
+                return
+            for pid in list(self._particles):
+                try:
+                    x1, y1, x2, y2 = c.coords(pid)
+                except Exception:
+                    continue
+                dy = -1
+                c.move(pid, 0, dy)
+                # wrap
+                if y2 < int(h * 0.1):
+                    c.move(pid, 0, int(h * 0.55))
+            self._particle_job = self.after(60, tick)
+
+        if self._particle_job is not None:
+            try:
+                self.after_cancel(self._particle_job)
+            except Exception:
+                pass
+        tick()
+
+    # -----------------------------
+    # Character layer
+    # -----------------------------
+
+    def _draw_sprites(self) -> None:
+        c = self.arena
+        c.delete("sprite")
+
+        px, py = self._player_anchor
+        ex, ey = self._enemy_anchor
+
+        self._player_sprite = c.create_oval(px - 34, py - 70, px + 34, py - 2, fill="#2dd4bf", outline="#0f172a", width=2, tags=("sprite", "player"))
+        c.create_rectangle(px - 22, py - 2, px + 22, py + 62, fill="#0ea5e9", outline="#0f172a", width=2, tags=("sprite", "player"))
+
+        self._enemy_sprite = c.create_polygon(
+            ex - 52,
+            ey + 52,
+            ex,
+            ey - 76,
+            ex + 56,
+            ey + 52,
+            ex,
+            ey + 76,
+            fill="#fb7185",
+            outline="#0f172a",
+            width=2,
+            smooth=True,
+            tags=("sprite", "enemy"),
+        )
+
+        # Idle bob (very subtle)
+        if self._idle_job is not None:
+            try:
+                self.after_cancel(self._idle_job)
+            except Exception:
+                pass
+
+        t0 = time.perf_counter()
+
+        def idle():
+            if not self.winfo_exists():
+                return
+            t = time.perf_counter() - t0
+            amp = 1.8
+            dy = int(math.sin(t * 2.2) * amp)
+            for tag in ("player", "enemy"):
+                ids = c.find_withtag(tag)
+                for iid in ids:
+                    c.move(iid, 0, dy - getattr(self, f"_{tag}_idle_dy", 0))
+                setattr(self, f"_{tag}_idle_dy", dy)
+            self._idle_job = self.after(90, idle)
+
+        idle()
+
+    # -----------------------------
+    # Commands / submenus
+    # -----------------------------
+
+    def _on_action(self, action: Action) -> None:
+        if self._busy or self.engine.is_over():
+            return
+        if self.engine.active_id != "player":
+            return
+        self._close_menus()
+        events = self.engine.player_action(action)
+        self._play_events(events)
+
+    def _close_menus(self) -> None:
+        self._tooltip.hide()
+        for w in (self.skill_menu, self.item_menu):
+            if w is not None:
+                w.destroy()
+        self.skill_menu = None
+        self.item_menu = None
+
+    def _open_skill_menu(self) -> None:
+        if self._busy or self.engine.active_id != "player":
+            return
+        self._close_menus()
+
+        actor = self.engine.get("player")
+
+        m = tk.Frame(self.menu_overlay, bg=self.theme["bg"], highlightthickness=1, highlightbackground=self.theme["panel_border"])
+        m.grid(row=0, column=0, sticky="ew", pady=(10, 0))
+
+        # 3 columns makes room for cooldown/cost info.
+        cols = 3
+        for i in range(cols):
+            m.columnconfigure(i, weight=1)
+
+        skill_ids = list(actor.skills)
+        if not skill_ids:
+            tk.Label(m, text="No skills", bg=self.theme["bg"], fg=self.theme["muted"], font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", padx=10, pady=10)
+            self.skill_menu = m
+            return
+
+        def mk_tile(sid: str, idx: int):
+            sd = self.content.skills.get(sid)
+            cd = actor.cooldown(sid)
+            enabled = (cd <= 0) and (actor.sp.current >= sd.cost_sp)
+
+            label = f"{sd.icon}  {sd.name}\nSP {sd.cost_sp}  |  CD {cd}" if cd > 0 else f"{sd.icon}  {sd.name}\nSP {sd.cost_sp}"
+
+            b = tk.Button(
+                m,
+                text=label,
+                command=(lambda: self._on_action(Action(kind="skill", skill_id=sid))) if enabled else None,
+                font=("Segoe UI", 10, "bold"),
+                bd=0,
+                relief="flat",
+                padx=12,
+                pady=10,
+                bg=self.theme["btn"],
+                fg=self.theme["btn_fg"],
+                activebackground=self.theme["btn_active"],
+                activeforeground=self.theme["btn_fg"],
+                disabledforeground=self.theme["btn_disabled_fg"],
+                cursor="hand2",
+                justify="left",
+                anchor="w",
+            )
+            if not enabled:
+                b.configure(state="disabled")
+
+            # tooltip + hint
+            def on_enter(_e=None):
+                self._set_hint(sd.description or "")
+                try:
+                    rx = b.winfo_rootx() + 20
+                    ry = b.winfo_rooty() - 10
+                    self._tooltip.show(sd.description or sd.name, rx, ry)
+                except Exception:
+                    pass
+
+            def on_leave(_e=None):
+                self._set_hint("")
+                self._tooltip.hide()
+
+            b.bind("<Enter>", on_enter)
+            b.bind("<Leave>", on_leave)
+
+            r = idx // cols
+            c = idx % cols
+            b.grid(row=r, column=c, sticky="ew", padx=8, pady=8)
+            return b
+
+        buttons: list[tk.Button] = []
+        for i, sid in enumerate(skill_ids):
+            try:
+                buttons.append(mk_tile(sid, i))
+            except Exception:
+                continue
+
+        # Keyboard shortcuts inside the skill grid (Q/W/E/R/A/S/D/F)
+        keys = ["q", "w", "e", "r", "a", "s", "d", "f"]
+        mapping = {}
+        for i, b in enumerate(buttons[: len(keys)]):
+            mapping[keys[i]] = b
+
+        def on_key(e):
+            k = (e.keysym or "").lower()
+            if k == "escape":
+                self._close_menus()
+                return "break"
+            b = mapping.get(k)
+            if b is not None and str(b["state"]) != "disabled":
+                try:
+                    b.invoke()
+                except Exception:
+                    pass
+                return "break"
+            return "break"
+
+        m.bind("<Key>", on_key)
+        m.focus_set()
+
+        self.skill_menu = m
+
+    def _open_item_menu(self) -> None:
+        if self._busy or self.engine.active_id != "player":
+            return
+        self._close_menus()
+
+        actor = self.engine.get("player")
+        p_count = int(actor.items.get("potion", 0))
+        e_count = int(actor.items.get("ether", 0))
+
+        m = tk.Frame(self.menu_overlay, bg=self.theme["bg"], highlightthickness=1, highlightbackground=self.theme["panel_border"])
+        m.grid(row=0, column=0, sticky="ew", pady=(10, 0))
+        for i in range(2):
+            m.columnconfigure(i, weight=1)
+
+        def mk_item(icon: str, name: str, item_id: str, count: int, hint: str, col: int):
+            b = ActionButton(
+                m,
+                icon=icon,
+                text=f"{name} x{count}",
+                command=lambda: self._on_action(Action(kind="item", item_id=item_id)),
+                theme=self.theme,
+                hint=hint,
+                on_hint=self._set_hint,
+                shortcut="",
+            )
+            b.configure(font=("Segoe UI", 10, "bold"))
+            if count <= 0:
+                b.configure(state="disabled")
+            b.grid(row=0, column=col, sticky="ew", padx=8, pady=10)
+
+        mk_item("☉", "Potion", "potion", p_count, "Potion: heal 28 HP.", 0)
+        mk_item("☉", "Ether", "ether", e_count, "Ether: restore 20 SP.", 1)
+
+        self.item_menu = m
+    # -----------------------------
+    # Animation / feedback
+    # -----------------------------
+
+    def _sprite_id(self, unit_id: str) -> int:
+        if unit_id == "player":
+            return int(self._player_sprite or 0)
+        return int(self._enemy_sprite or 0)
+
+    def _anchor(self, unit_id: str) -> tuple[int, int]:
+        return self._player_anchor if unit_id == "player" else self._enemy_anchor
+
+    def _lunge(self, attacker_id: str, done) -> None:
+        c = self.arena
+        sprite = self._sprite_id(attacker_id)
+        ax, _ = self._anchor(attacker_id)
+        tx, _ = self._anchor("enemy" if attacker_id == "player" else "player")
+        dir_ = 1 if tx > ax else -1
+
+        def upd(t):
+            dx = int(math.sin(t * math.pi) * 18 * dir_)
+            c.move(sprite, dx - getattr(self, "_last_dx", 0), 0)
+            self._last_dx = dx
+
+        def end():
+            c.move(sprite, -getattr(self, "_last_dx", 0), 0)
+            self._last_dx = 0
+            done()
+
+        self.anim.tween(180, upd, end, easing="in_out_quad")
+
+    def _shake(self, target_id: str, done) -> None:
+        c = self.arena
+        sprite = self._sprite_id(target_id)
+
+        def upd(t):
+            amp = (1.0 - t) * 7
+            dx = int(math.sin(t * 10 * math.pi) * amp)
+            dy = int(math.cos(t * 8 * math.pi) * (amp * 0.35))
+            c.move(sprite, dx - getattr(self, "_shake_dx", 0), dy - getattr(self, "_shake_dy", 0))
+            self._shake_dx = dx
+            self._shake_dy = dy
+
+        def end():
+            c.move(sprite, -getattr(self, "_shake_dx", 0), -getattr(self, "_shake_dy", 0))
+            self._shake_dx = 0
+            self._shake_dy = 0
+            done()
+
+        self.anim.tween(170, upd, end, easing="out_cubic")
+
+    def _screen_shake(self, intensity: float, done) -> None:
+        """Shake the whole arena (bg + sprites) for heavy hits."""
+        c = self.arena
+        intensity = max(0.0, float(intensity))
+
+        def upd(t):
+            amp = (1.0 - t) * intensity
+            dx = int(math.sin(t * 12 * math.pi) * amp)
+            c.move("bg", dx - getattr(self, "_cam_dx", 0), 0)
+            c.move("particle", dx - getattr(self, "_cam_dx", 0), 0)
+            c.move("sprite", dx - getattr(self, "_cam_dx", 0), 0)
+            c.move("fx", dx - getattr(self, "_cam_dx", 0), 0)
+            self._cam_dx = dx
+
+        def end():
+            c.move("bg", -getattr(self, "_cam_dx", 0), 0)
+            c.move("particle", -getattr(self, "_cam_dx", 0), 0)
+            c.move("sprite", -getattr(self, "_cam_dx", 0), 0)
+            c.move("fx", -getattr(self, "_cam_dx", 0), 0)
+            self._cam_dx = 0
+            done()
+
+        self.anim.tween(160, upd, end, easing="out_cubic")
+    def _flash(self, target_id: str, done, *, color: str) -> None:
+        c = self.arena
+        x, y = self._anchor(target_id)
+        r = 62
+        flash = c.create_oval(x - r, y - r, x + r, y + r, fill=color, outline="", stipple="gray50", tags=("fx",))
+
+        def upd(t):
+            rr = int(_lerp(r, 18, t))
+            c.coords(flash, x - rr, y - rr, x + rr, y + rr)
+            c.itemconfigure(flash, fill=_mix(color, self.theme["bg"], t * 0.55))
+
+        def end():
+            c.delete(flash)
+            done()
+
+        self.anim.tween(140, upd, end)
+
+    def _shield_pop(self, target_id: str, done) -> None:
+        c = self.arena
+        x, y = self._anchor(target_id)
+        r0 = 16
+        r1 = 72
+        ring = c.create_oval(x - r0, y - r0, x + r0, y + r0, outline="#5eead4", width=3, tags=("fx",))
+        badge = c.create_text(x, y - 84, text="SHIELD", fill="#5eead4", font=("Segoe UI", 11, "bold"), tags=("fx",))
+
+        def upd(t):
+            rr = int(_lerp(r0, r1, t))
+            c.coords(ring, x - rr, y - rr, x + rr, y + rr)
+            c.itemconfigure(ring, outline=_mix("#5eead4", self.theme["bg"], t * 0.8))
+            c.itemconfigure(badge, fill=_mix("#5eead4", self.theme["bg"], t * 0.65))
+
+        def end():
+            c.delete(ring)
+            c.delete(badge)
+            done()
+
+        self.anim.tween(220, upd, end)
+
+    def _pop_label(self, target_id: str, text: str, color: str) -> None:
+        c = self.arena
+        x, y = self._anchor(target_id)
+        txt = c.create_text(x, y - 98, text=text, fill=color, font=("Segoe UI", 11, "bold"), tags=("fx",))
+
+        def upd(t):
+            dy = int(_lerp(0, -12, t))
+            c.coords(txt, x, y - 98 + dy)
+            c.itemconfigure(txt, fill=_mix(color, self.theme["bg"], t * 0.78))
+
+        def end():
+            c.delete(txt)
+
+        self.anim.tween(240, upd, end)
+
+    def _float_number(self, target_id: str, amount: int, color: str, done) -> None:
+        c = self.arena
+        x, y = self._anchor(target_id)
+        txt = c.create_text(x, y - 124, text=f"{amount}", fill=color, font=("Segoe UI", 12, "bold"), tags=("fx",))
+
+        def upd(t):
+            dy = int(_lerp(0, -18, t))
+            c.coords(txt, x, y - 124 + dy)
+            c.itemconfigure(txt, fill=_mix(color, self.theme["bg"], t * 0.85))
+
+        def end():
+            c.delete(txt)
+            done()
+
+        self.anim.tween(280, upd, end)
+
+    def _mark_defeated(self, unit_id: str) -> None:
+        c = self.arena
+        sprite = self._sprite_id(unit_id)
+        if sprite:
+            try:
+                c.itemconfigure(sprite, fill="#111827")
+                c.move(sprite, 0, 18)
+            except Exception:
+                pass
+
+    # -----------------------------
+    # Event playback
+    # -----------------------------
+
+    def _play_events(self, events: list[CombatEvent]) -> None:
+        if not events:
+            self._refresh_panels(immediate=True)
+            self._refresh_timeline()
+            self._set_controls_enabled(self.engine.active_id == "player" and not self.engine.is_over())
+            self._announce_turn()
+            return
+
+        self._busy = True
+        self._set_controls_enabled(False)
+
+        steps = [lambda done, ev=ev: self._play_event(ev, done) for ev in events]
+
+        def finish():
+            self._busy = False
+            self._refresh_panels(immediate=True)
+            self._refresh_timeline()
+            self._set_controls_enabled(self.engine.active_id == "player" and not self.engine.is_over())
+            self._announce_turn()
+
+        self.anim.run_sequence(steps, on_done=finish)
+
+    def _play_event(self, ev: CombatEvent, done) -> None:
+        # Log first for responsiveness.
+        tag = "system"
+        if ev.kind == "turn":
+            tag = "turn"
+        elif ev.actor == "player":
+            tag = "player"
+        elif ev.actor == "enemy":
+            tag = "enemy"
+
+        if ev.tag and ev.kind in ("damage", "miss"):
+            self.log.line(f"{ev.text} ({ev.tag})", tag=tag)
+        else:
+            self.log.line(ev.text, tag=tag)
+
+        self._refresh_panels(immediate=False)
+
+        if ev.kind == "damage" and ev.target and ev.amount is not None:
+            target_id = ev.target
+            attacker_id = ev.actor or ("enemy" if target_id == "player" else "player")
+
+            # Element-tinted feedback
+            elem = str(ev.meta.get("element", "Neutral")) if isinstance(ev.meta, dict) else "Neutral"
+            fx_col = self.content.elements.color(elem)
+            num_col = fx_col
+            if ev.tag:
+                if "Super Effective" in ev.tag:
+                    num_col = "#fbbf24"
+                elif "Resisted" in ev.tag:
+                    num_col = "#93c5fd"
+
+            anim_kind = str(ev.meta.get("animation", "")) if isinstance(ev.meta, dict) else ""
+            is_heavy = anim_kind == "heavy"
+            is_crit = ("CRIT" in (ev.tag or "")) or (bool(ev.meta.get("crit")) if isinstance(ev.meta, dict) else False)
+
+            def after_lunge():
+                if target_id == "player":
+                    self.player_panel.hp_bar.set_target_ratio(self.engine.get("player").hp.ratio())
+                else:
+                    self.enemy_panel.hp_bar.set_target_ratio(self.engine.get("enemy").hp.ratio())
+
+                def bar_upd(t):
+                    if target_id == "player":
+                        self.player_panel.hp_bar.step(t, hp_style=True)
+                    else:
+                        self.enemy_panel.hp_bar.step(t, hp_style=True)
+
+                self.anim.tween(250, bar_upd, None)
+
+                if ev.tag:
+                    if "Super Effective" in ev.tag:
+                        self._pop_label(target_id, "Super Effective!", "#fbbf24")
+                    elif "Resisted" in ev.tag:
+                        self._pop_label(target_id, "Resisted", "#93c5fd")
+                    if "CRIT" in ev.tag:
+                        self._pop_label(target_id, "Critical!", "#f472b6")
+
+                def after_hit():
+                    # defeat state
+                    if not self.engine.get(target_id).alive():
+                        self._mark_defeated(target_id)
+                    self._float_number(target_id, ev.amount or 0, num_col, done)
+
+                def hit_fx():
+                    self._flash(target_id, lambda: self._shake(target_id, after_hit), color=fx_col)
+
+                if is_heavy or is_crit:
+                    self._screen_shake(10.0 if is_heavy else 6.0, hit_fx)
+                else:
+                    hit_fx()
+
+            self._lunge(attacker_id, after_lunge)
+            return
+
+        if ev.kind == "heal" and ev.target and ev.amount is not None:
+            target_id = ev.target
+            if target_id == "player":
+                self.player_panel.hp_bar.set_target_ratio(self.engine.get("player").hp.ratio())
+            else:
+                self.enemy_panel.hp_bar.set_target_ratio(self.engine.get("enemy").hp.ratio())
+
+            def bar_upd(t):
+                if target_id == "player":
+                    self.player_panel.hp_bar.step(t, hp_style=True)
+                else:
+                    self.enemy_panel.hp_bar.step(t, hp_style=True)
+
+            self.anim.tween(230, bar_upd, None)
+            self._float_number(target_id, ev.amount, "#7dffb2", done)
+            return
+
+        if ev.kind == "resource" and ev.actor and ev.tag == "sp":
+            uid = ev.actor
+            if uid == "player":
+                self.player_panel.sp_bar.set_target_ratio(self.engine.get("player").sp.ratio())
+                self.anim.tween(230, lambda t: self.player_panel.sp_bar.step(t, hp_style=False), done)
+            else:
+                self.enemy_panel.sp_bar.set_target_ratio(self.engine.get("enemy").sp.ratio())
+                self.anim.tween(230, lambda t: self.enemy_panel.sp_bar.step(t, hp_style=False), done)
+            return
+
+        if ev.kind == "status" and ev.tag == "shield" and ev.target:
+            self._shield_pop(ev.target, done)
+            return
+
+        if ev.kind == "status" and ev.tag == "charge" and ev.target:
+            self._pop_label(ev.target, "CHARGING", "#fbbf24")
+            self.after(90, done)
+            return
+
+        if ev.kind == "miss" and ev.target:
+            attacker_id = ev.actor or "player"
+            self._lunge(attacker_id, done)
+            return
+
+        self.after(70, done)
+
+
+# -----------------------------
+# Convenience constructors (used by main.py)
+# -----------------------------
+
+
+_DEFAULT_CONTENT = Content.load(Path("jsons"))
+
+
+def make_default_player(name: str, element: str) -> Combatant:
+    e = _DEFAULT_CONTENT.elements.normalize(element)
+    return Combatant(
+        id="player",
+        team="player",
+        name=name or "Hero",
+        element=e,
+        hp=Resource(100, 100),
+        sp=Resource(50, 50),
+        attack=15,
+        defense=7,
+        speed=11,
+        skills=["elemental", "burst", "focus", "heavy_charge"],
+    )
+
+
+def make_enemy_from_template(tpl: dict) -> Combatant:
+    name = tpl.get("name", "Enemy")
+    elem = _DEFAULT_CONTENT.elements.normalize(tpl.get("element", "Neutral"))
+    hp = int(tpl.get("hp", 90))
+
+    atk_min = int(tpl.get("attack_min", 8))
+    atk_max = int(tpl.get("attack_max", 14))
+    attack = int(round((atk_min + atk_max) / 2)) + 1
+
+    skills = tpl.get("skills")
+    if not isinstance(skills, list) or not skills:
+        skills = ["elemental", "poison_sting", "heavy_charge"]
+
+    return Combatant(
+        id="enemy",
+        team="enemy",
+        name=name,
+        element=elem,
+        hp=Resource(hp, hp),
+        sp=Resource(40, 40),
+        attack=attack,
+        defense=6,
+        speed=9 + int(hp < 90),
+        accuracy=0.92,
+        crit_chance=0.06,
+        skills=[str(s) for s in skills],
+    )

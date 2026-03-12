@@ -1,0 +1,24 @@
+[
+    {
+        "name": "Human",
+        "description": "Versatile and ambitious species known for their adaptability.",
+        "traits": ["Adaptability", "Ambition", "Diversity"]
+    },
+    {
+        "name": "Elf",
+        "description": "Graceful beings with a deep connection to nature and magic.",
+        "traits": ["Longevity", "Magic Affinity", "Keen Senses"]
+    },
+    {
+        "name": "Dwarf",
+        "description": "Stout and sturdy folk, masters of craftsmanship and mining.",
+        "traits": ["Endurance", "Craftsmanship", "Resilience"]
+    },
+    {
+        "name": "Orc",
+        "description": "Fierce warriors with a strong sense of honor and community.",
+        "traits": ["Strength", "Warrior Spirit", "Loyalty"]
+    }
+
+    
+]

@@ -1,0 +1,78 @@
+[
+  {
+    "biome": "Forest",
+    "description": "A lush area filled with trees and wildlife.",
+    "common_enemies": ["Goblin", "Wolf", "Bandit"],
+    "resources": ["Wood", "Herbs", "Berries"]
+  },
+  
+  {
+    "biome": "Prism Reef",
+    "description": "A shallow, sun-drenched shelf where hexagonal crystal coral refracts rainbow light.",
+    "common_enemies": ["Coral Golem", "Reef Shark", "Prism Ray"],
+    "resources": ["Coral Fragments", "Pearls", "Rainbow Scale"]
+  },
+
+  {
+    "biome": "Emberglow Caves",
+    "description": "Vast caverns lined with slow-burning, coal-blue 'cold-fire' lichen; oxygen-poor air forces copper-based life.",
+    "common_enemies": ["Argon Bat", "Ember Sprite", "Lichentooth"],
+    "resources": ["Cold-Fire Lichen", "Copper Ore", "Spark Dust"]
+  },
+
+  {
+    "biome": "Drizzlewood",
+    "description": "Temperate forest locked in perpetual dusk; water beads on high fronds and drips in musical pulses.",
+    "common_enemies": ["Dusk Moth", "Capillary Spider", "Pulsing Bloom"],
+    "resources": ["Resonant Wood", "Dew Oil", "Seed-Vault Resin"]
+  },
+
+  {
+    "biome": "Mirrorsteppe",
+    "description": "Endless salt flats crusted with micron-thin mirrored tiles; footsteps create illusory sky-ripples.",
+    "common_enemies": ["Glass Viper", "Reflection Lure", "Mirage Stalker"],
+    "resources": ["Mirror Shards", "Sky Salt", "Illusion Silk"]
+  },
+
+  {
+    "biome": "Nimbus Tundra",
+    "description": "High-latitude plain with slightly weaker gravity; snow boulders float on wind currents.",
+    "common_enemies": ["Drift Maw", "Snow Boulder Crab", "Aurora Wisp"],
+    "resources": ["Nimbus Snow", "Levity Crystal", "Aurora Thread"]
+  },
+
+  {
+    "biome": "Obsidian Bloom Badlands",
+    "description": "Recently cooled lava fields where black glass fissures exhale chilled argon; neon bacteria bloom at night.",
+    "common_enemies": ["Obsidian Snapjaw", "Argon Wraith", "Bloom Leech"],
+    "resources": ["Obsidian Glass", "Neon Bacteria", "Chill Gas"]
+  },
+
+  {
+    "biome": "Riftglass Savannah",
+    "description": "Grassland split by hairline fissures filled with clear silicate gel that pipes sunlight underground.",
+    "common_enemies": ["Gel Wyrm", "Light-Pipe Scorpion", "Refraction Hound"],
+    "resources": ["Riftglass Gel", "Fiber-Optic Reed", "Sun-Root"]
+  },
+
+  {
+    "biome": "Sighing Mangrove",
+    "description": "Coastal swamp where trees inhale methane at dusk and exhale CO₂ at dawn, shifting water levels.",
+    "common_enemies": ["Tide Skater", "Mangrove Leech", "Sigh Brute"],
+    "resources": ["Methane Bladder", "Tidal Bark", "Bioluminescent Clam"]
+  },
+
+  {
+    "biome": "Aurora Drift",
+    "description": "Polar sea ice grown in magnetite-hex cells that levitate under solar wind; sailors skate-sail floes.",
+    "common_enemies": ["Magnetite Leviathan", "Polar Skate-Ray", "Aurora Banshee"],
+    "resources": ["Magnetite Hex", "Aurora Essence", "Skate-Sail Membrane"]
+  },
+
+  {
+    "biome": "Hollowspire Jungle",
+    "description": "Vertical rainforest inside a continent-sized hollow trunk; waterfalls flow upward via capillary xylem.",
+    "common_enemies": ["Xylem Serpent", "Updraft Ape", "Spire Mantis"],
+    "resources": ["Capillary Wood", "Updraft Sap", "Prehensile Vine"]
+  }
+]
