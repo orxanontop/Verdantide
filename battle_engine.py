@@ -107,7 +107,7 @@ class BattleEngine:
             return []
 
         sim_next = {u.id: float(u.next_at) for u in live}
-        sim_speed = {u.id: max(1, int(u.speed)) for u in live}
+        sim_speed = {u.id: self._effective_speed(u) for u in live}
 
         out: list[str] = []
         for _ in range(max(0, int(count))):
@@ -122,8 +122,21 @@ class BattleEngine:
             return ""
         return min(live, key=lambda u: u.next_at).id
 
+    def _effective_speed(self, unit: Combatant) -> int:
+        """Speed with status multipliers applied (for timeline scheduling)."""
+        base = max(1.0, float(unit.speed))
+        mult = 1.0
+        for inst in unit.statuses.values():
+            if not inst.alive():
+                continue
+            sm = float(getattr(inst.defn, "speed_mult", 1.0) or 1.0)
+            if sm == 1.0:
+                continue
+            mult *= sm ** max(1, int(inst.stacks))
+        return max(1, int(round(base * mult)))
+
     def _advance_clock(self, actor: Combatant) -> None:
-        actor.next_at += 100.0 / max(1, int(actor.speed))
+        actor.next_at += 100.0 / self._effective_speed(actor)
 
     # ---------
     # Public turn entrypoint
@@ -165,11 +178,35 @@ class BattleEngine:
         # Prefer the lowest HP% target to create pressure.
         return min(enemies, key=lambda u: u.hp.ratio())
 
+    def _choose_target(self, actor: Combatant, target_id: str | None) -> Combatant | None:
+        if target_id:
+            t = self.units.get(str(target_id))
+            if t and t.alive() and t.team != actor.team:
+                return t
+        return self._choose_default_target(actor)
+
     def _tick_statuses_start_turn(self, actor: Combatant) -> list[CombatEvent]:
         events: list[CombatEvent] = []
 
         # Cooldowns tick at the start of your turn.
         actor.tick_cooldowns()
+
+        # Gentle SP regen to keep pacing snappy (silent UI event animates the bar).
+        before_sp = actor.sp.current
+        actor.sp.gain(2)
+        gained_sp = actor.sp.current - before_sp
+        if gained_sp > 0:
+            events.append(
+                CombatEvent(
+                    kind="resource",
+                    actor=actor.id,
+                    target=actor.id,
+                    amount=gained_sp,
+                    text="",
+                    tag="sp",
+                    meta={"silent": True, "sp_to": actor.sp.current, "sp_max": actor.sp.maximum, "reason": "turn_regen"},
+                )
+            )
 
         # DoT and per-turn logic.
         for sid, inst in list(actor.statuses.items()):
@@ -180,7 +217,17 @@ class BattleEngine:
             if t == "dot":
                 dmg = max(1, int(inst.defn.potency)) * max(1, int(inst.stacks))
                 dealt = actor.take_damage(dmg)
-                events.append(CombatEvent(kind="damage", actor=None, target=actor.id, amount=dealt, text=f"{actor.name} suffers {dealt} from {inst.defn.name}.", tag=sid))
+                events.append(
+                    CombatEvent(
+                        kind="damage",
+                        actor=None,
+                        target=actor.id,
+                        amount=dealt,
+                        text=f"{actor.name} suffers {dealt} from {inst.defn.name}.",
+                        tag=sid,
+                        meta={"animation": "dot", "hp_to": actor.hp.current, "hp_max": actor.hp.maximum},
+                    )
+                )
 
             elif t == "ramp_dot":
                 # Increasing damage each time this triggers.
@@ -189,7 +236,17 @@ class BattleEngine:
                 dmg = (max(0, int(inst.defn.base)) + max(0, int(inst.defn.ramp_per_turn)) * ticks) * max(1, int(inst.stacks))
                 dmg = max(1, int(dmg))
                 dealt = actor.take_damage(dmg)
-                events.append(CombatEvent(kind="damage", actor=None, target=actor.id, amount=dealt, text=f"{actor.name} takes {dealt} poison damage.", tag=sid))
+                events.append(
+                    CombatEvent(
+                        kind="damage",
+                        actor=None,
+                        target=actor.id,
+                        amount=dealt,
+                        text=f"{actor.name} takes {dealt} poison damage.",
+                        tag=sid,
+                        meta={"animation": "dot", "hp_to": actor.hp.current, "hp_max": actor.hp.maximum},
+                    )
+                )
 
             # charge is consumed by action, not by ticking
 
@@ -243,9 +300,9 @@ class BattleEngine:
 
         # Resolve.
         if action.kind == "attack":
-            target = self._choose_default_target(actor)
+            target = self._choose_target(actor, action.target_id)
             if target:
-                events.extend(self._resolve_damage(actor, target, base_power=1.0, accuracy=1.0, element_override="Neutral"))
+                events.extend(self._resolve_damage(actor, target, base_power=1.0, accuracy=1.0, element_override="Neutral", break_bonus=0))
 
         elif action.kind == "defend":
             actor.apply_status(self.content.statuses, "shield", duration=1, stacks=1)
@@ -255,7 +312,7 @@ class BattleEngine:
             events.extend(self._resolve_item(actor, action.item_id or ""))
 
         elif action.kind == "skill":
-            events.extend(self._resolve_skill(actor, action.skill_id or ""))
+            events.extend(self._resolve_skill(actor, action.skill_id or "", target_id=action.target_id))
 
         else:
             events.append(CombatEvent(kind="log", actor=actor.id, text="..."))
@@ -284,7 +341,16 @@ class BattleEngine:
         if item_id == "potion":
             user.items[item_id] -= 1
             healed = user.heal(28)
-            events.append(CombatEvent(kind="heal", actor=user.id, target=user.id, amount=healed, text=f"{user.name} drinks a Potion (+{healed})."))
+            events.append(
+                CombatEvent(
+                    kind="heal",
+                    actor=user.id,
+                    target=user.id,
+                    amount=healed,
+                    text=f"{user.name} drinks a Potion (+{healed}).",
+                    meta={"hp_to": user.hp.current, "hp_max": user.hp.maximum, "animation": "potion"},
+                )
+            )
             return events
 
         if item_id == "ether":
@@ -292,12 +358,22 @@ class BattleEngine:
             before = user.sp.current
             user.sp.gain(20)
             gained = user.sp.current - before
-            events.append(CombatEvent(kind="resource", actor=user.id, target=user.id, amount=gained, text=f"{user.name} uses Ether (+{gained} SP).", tag="sp"))
+            events.append(
+                CombatEvent(
+                    kind="resource",
+                    actor=user.id,
+                    target=user.id,
+                    amount=gained,
+                    text=f"{user.name} uses Ether (+{gained} SP).",
+                    tag="sp",
+                    meta={"sp_to": user.sp.current, "sp_max": user.sp.maximum, "animation": "ether"},
+                )
+            )
             return events
 
         return [CombatEvent(kind="log", actor=user.id, text="Nothing happens.")]
 
-    def _resolve_skill(self, actor: Combatant, skill_id: str) -> list[CombatEvent]:
+    def _resolve_skill(self, actor: Combatant, skill_id: str, *, target_id: str | None = None) -> list[CombatEvent]:
         events: list[CombatEvent] = []
 
         # Built-in forced heavy strike (kept internal so content stays simple).
@@ -307,7 +383,7 @@ class BattleEngine:
             if not tgt:
                 return []
             events.append(CombatEvent(kind="action", actor=actor.id, target=tgt.id, text=f"{actor.name} unleashes a Heavy Strike!", tag="heavy"))
-            events.extend(self._resolve_damage(actor, tgt, base_power=1.65, accuracy=0.85, element_override="Neutral", animation="heavy"))
+            events.extend(self._resolve_damage(actor, tgt, base_power=1.65, accuracy=0.85, element_override="Neutral", animation="heavy", break_bonus=18))
             return events
 
         # Normal data-driven skill.
@@ -319,8 +395,22 @@ class BattleEngine:
         if actor.cooldown(sd.id) > 0:
             return [CombatEvent(kind="log", actor=actor.id, text=f"{sd.name} is on cooldown.")]
 
+        before_sp = actor.sp.current
         if not actor.sp.spend(sd.cost_sp):
             return [CombatEvent(kind="log", actor=actor.id, text=f"{actor.name} lacks SP.")]
+        spent = before_sp - actor.sp.current
+        if spent > 0:
+            events.append(
+                CombatEvent(
+                    kind="resource",
+                    actor=actor.id,
+                    target=actor.id,
+                    amount=-spent,
+                    text="",
+                    tag="sp",
+                    meta={"silent": True, "sp_to": actor.sp.current, "sp_max": actor.sp.maximum, "reason": "skill_cost"},
+                )
+            )
 
         if sd.cooldown > 0:
             actor.set_cooldown(sd.id, sd.cooldown)
@@ -329,12 +419,32 @@ class BattleEngine:
             healed = 0
             if sd.heal > 0:
                 healed = actor.heal(sd.heal)
-                events.append(CombatEvent(kind="heal", actor=actor.id, target=actor.id, amount=healed, text=f"{actor.name} uses {sd.name} (+{healed} HP).", tag=sd.id, meta={"animation": sd.animation}))
+                events.append(
+                    CombatEvent(
+                        kind="heal",
+                        actor=actor.id,
+                        target=actor.id,
+                        amount=healed,
+                        text=f"{actor.name} uses {sd.name} (+{healed} HP).",
+                        tag=sd.id,
+                        meta={"animation": sd.animation, "hp_to": actor.hp.current, "hp_max": actor.hp.maximum},
+                    )
+                )
             if sd.gain_sp > 0:
                 before = actor.sp.current
                 actor.sp.gain(sd.gain_sp)
                 gained = actor.sp.current - before
-                events.append(CombatEvent(kind="resource", actor=actor.id, target=actor.id, amount=gained, text=f"{actor.name} recovers +{gained} SP.", tag="sp", meta={"animation": sd.animation}))
+                events.append(
+                    CombatEvent(
+                        kind="resource",
+                        actor=actor.id,
+                        target=actor.id,
+                        amount=gained,
+                        text=f"{actor.name} recovers +{gained} SP.",
+                        tag="sp",
+                        meta={"animation": sd.animation, "sp_to": actor.sp.current, "sp_max": actor.sp.maximum},
+                    )
+                )
             return events
 
         if sd.kind == "stance":
@@ -343,13 +453,24 @@ class BattleEngine:
             return events
 
         # Attack skill
-        target = self._choose_default_target(actor)
+        target = self._choose_target(actor, target_id)
         if not target:
             return []
 
         events.append(CombatEvent(kind="action", actor=actor.id, target=target.id, text=f"{actor.name} uses {sd.name}!", tag=sd.id, meta={"animation": sd.animation}))
         elem = actor.element if sd.element == "auto" else sd.element
-        events.extend(self._resolve_damage(actor, target, base_power=sd.base_power, accuracy=sd.accuracy, element_override=elem, crit_bonus=sd.crit_bonus, animation=sd.animation))
+        events.extend(
+            self._resolve_damage(
+                actor,
+                target,
+                base_power=sd.base_power,
+                accuracy=sd.accuracy,
+                element_override=elem,
+                crit_bonus=sd.crit_bonus,
+                animation=sd.animation,
+                break_bonus=int(getattr(sd, "break_bonus", 0) or 0),
+            )
+        )
         events.extend(self._apply_skill_statuses(actor, target, sd))
         return events
 
@@ -398,6 +519,7 @@ class BattleEngine:
         element_override: str,
         crit_bonus: float = 0.0,
         animation: str = "slash",
+        break_bonus: int = 0,
     ) -> list[CombatEvent]:
         if not attacker.alive() or not defender.alive():
             return []
@@ -420,21 +542,32 @@ class BattleEngine:
         # Element
         mult, label = self.content.elements.multiplier(element_override, defender.element)
 
-        # Defender shield (consume on first hit)
-        if defender.has("shield"):
-            inst = defender.statuses.get("shield")
-            if inst and inst.alive():
-                mult *= max(0.05, float(inst.defn.incoming_mult or 1.0))
-            defender.remove_status("shield")
+        # Defender incoming damage modifiers (shield consumes on hit).
+        incoming_mult = 1.0
+        consume: list[str] = []
+        for sid, inst in defender.statuses.items():
+            if not inst.alive():
+                continue
+            m = float(getattr(inst.defn, "incoming_mult", 1.0) or 1.0)
+            if m == 1.0:
+                continue
+            if inst.defn.type == "shield":
+                incoming_mult *= max(0.05, m)
+                consume.append(sid)
+            else:
+                incoming_mult *= m ** max(1, int(inst.stacks))
 
         # Crit
         is_crit = self._rng.random() < max(0.0, min(1.0, float(attacker.crit_chance) + float(crit_bonus)))
         if is_crit:
             base *= float(attacker.crit_mult)
 
-        dmg = int(round(base * mult))
+        dmg = int(round(base * mult * incoming_mult))
         dmg = max(1, dmg)
         dealt = defender.take_damage(dmg)
+
+        for sid in consume:
+            defender.remove_status(sid)
 
         tag = ""
         if label:
@@ -450,7 +583,86 @@ class BattleEngine:
                 amount=dealt,
                 text=f"{attacker.name} hits {defender.name} for {dealt}.",
                 tag=tag,
-                meta={"animation": animation, "element": element_override, "crit": is_crit},
+                meta={
+                    "animation": animation,
+                    "element": element_override,
+                    "crit": is_crit,
+                    "hp_to": defender.hp.current,
+                    "hp_max": defender.hp.maximum,
+                },
             )
         )
+
+        # Break gauge build-up (separate resource events so UI can animate deterministically).
+        events.extend(self._apply_break(attacker, defender, dealt=dealt, effectiveness=label, is_crit=is_crit, break_bonus=break_bonus))
+        return events
+
+    def _apply_break(
+        self,
+        attacker: Combatant,
+        defender: Combatant,
+        *,
+        dealt: int,
+        effectiveness: str,
+        is_crit: bool,
+        break_bonus: int,
+    ) -> list[CombatEvent]:
+        if not defender.alive() or defender.break_gauge.maximum <= 0:
+            return []
+
+        # Don't build break on a unit that's already in a broken state.
+        if defender.has("broken"):
+            return []
+
+        base = 6 + min(14, int(max(0, int(dealt)) * 0.18))
+        if effectiveness == "Super Effective":
+            base += 10
+        elif effectiveness == "Resisted":
+            base = max(0, base - 4)
+        if is_crit:
+            base += 6
+        base += max(0, int(break_bonus))
+
+        gain = max(0, int(base))
+        if gain <= 0:
+            return []
+
+        events: list[CombatEvent] = []
+        before = defender.break_gauge.current
+        defender.break_gauge.gain(gain)
+        after = defender.break_gauge.current
+        if after != before:
+            events.append(
+                CombatEvent(
+                    kind="resource",
+                    actor=attacker.id,
+                    target=defender.id,
+                    amount=after - before,
+                    text="",
+                    tag="break",
+                    meta={"silent": True, "break_to": after, "break_max": defender.break_gauge.maximum},
+                )
+            )
+
+        if defender.break_gauge.current >= defender.break_gauge.maximum:
+            # Trigger break: apply a stun-like status and reset the gauge.
+            try:
+                defender.apply_status(self.content.statuses, "broken", duration=2, stacks=1)
+                events.append(CombatEvent(kind="status", actor=attacker.id, target=defender.id, amount=None, text=f"{defender.name} is Broken!", tag="broken", meta={"animation": "break"}))
+            except Exception:
+                pass
+
+            defender.break_gauge.set(0)
+            events.append(
+                CombatEvent(
+                    kind="resource",
+                    actor=attacker.id,
+                    target=defender.id,
+                    amount=0,
+                    text="",
+                    tag="break",
+                    meta={"silent": True, "break_to": 0, "break_max": defender.break_gauge.maximum, "reason": "break_reset"},
+                )
+            )
+
         return events

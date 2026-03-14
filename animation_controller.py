@@ -36,6 +36,18 @@ class AnimationController:
         self._w = widget
         self._jobs: set[str] = set()
 
+    def _after(self, delay_ms: int, fn: Callable[[], None]) -> str:
+        job: str | None = None
+
+        def wrapped():
+            if job is not None:
+                self._jobs.discard(job)
+            fn()
+
+        job = self._w.after(int(delay_ms), wrapped)
+        self._jobs.add(job)
+        return job
+
     def cancel_all(self) -> None:
         for job in list(self._jobs):
             try:
@@ -76,11 +88,9 @@ class AnimationController:
                         pass
                 return
 
-            job = self._w.after(step_ms, tick)
-            self._jobs.add(job)
+            self._after(step_ms, tick)
 
-        job0 = self._w.after(0, tick)
-        self._jobs.add(job0)
+        self._after(0, tick)
 
     def run_sequence(
         self,

@@ -28,6 +28,7 @@ class SkillDef:
     base_power: float = 1.0
     accuracy: float = 1.0
     crit_bonus: float = 0.0
+    break_bonus: int = 0
 
     # Support skills
     heal: int = 0
@@ -80,6 +81,7 @@ class SkillLibrary:
                     base_power=float(row.get("base_power", 1.0) or 1.0),
                     accuracy=float(row.get("accuracy", 1.0) or 1.0),
                     crit_bonus=float(row.get("crit_bonus", 0.0) or 0.0),
+                    break_bonus=int(row.get("break_bonus", 0) or 0),
                     heal=int(row.get("heal", 0) or 0),
                     gain_sp=int(row.get("gain_sp", 0) or 0),
                     cost_sp=int(row.get("cost_sp", 0) or 0),

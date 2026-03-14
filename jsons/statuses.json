@@ -43,5 +43,42 @@
     "duration": 1,
     "stacking": "refresh",
     "max_stacks": 1
+  },
+  "broken": {
+    "name": "Broken",
+    "icon": "💥",
+    "type": "skip",
+    "duration": 2,
+    "stacking": "refresh",
+    "max_stacks": 1,
+    "chance": 1.0,
+    "incoming_mult": 1.25
+  },
+  "exposed": {
+    "name": "Exposed",
+    "icon": "🎯",
+    "type": "debuff",
+    "duration": 2,
+    "stacking": "refresh",
+    "max_stacks": 1,
+    "incoming_mult": 1.15
+  },
+  "haste": {
+    "name": "Haste",
+    "icon": "💨",
+    "type": "buff",
+    "duration": 2,
+    "stacking": "refresh",
+    "max_stacks": 1,
+    "speed_mult": 1.25
+  },
+  "slow": {
+    "name": "Slow",
+    "icon": "🕸",
+    "type": "debuff",
+    "duration": 2,
+    "stacking": "refresh",
+    "max_stacks": 1,
+    "speed_mult": 0.8
   }
 }

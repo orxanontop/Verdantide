@@ -68,6 +68,14 @@ def choose_enemy_action(engine: BattleEngine, actor) -> Action:
         if "burst" in sd.id and target.hp.ratio() < 0.55:
             w += 1.0
 
+        # Prefer sunder-like pressure when it will matter.
+        if "sunder" in sd.id and (not target.has("exposed")):
+            w += 0.55
+
+        # Prefer quick-step when not already hasted.
+        if "quick_step" in sd.id and (not actor.has("haste")):
+            w += 0.65
+
         # Prefer focus-type support when low.
         if sd.kind == "support" and actor.hp.ratio() < 0.55:
             w += 1.0
@@ -79,6 +87,14 @@ def choose_enemy_action(engine: BattleEngine, actor) -> Action:
             w += 1.1
         elif mult <= engine.content.elements.resisted_mult:
             w -= 0.35
+
+        # Break pressure: use high-break skills when target is close to breaking.
+        try:
+            br = float(target.break_gauge.ratio())
+        except Exception:
+            br = 0.0
+        if br >= 0.55 and int(getattr(sd, "break_bonus", 0) or 0) >= 10:
+            w += 0.85
 
         # Cooldown skills are stronger; bias toward using them if ready.
         w += min(0.6, 0.2 * max(0, int(sd.cooldown)))

@@ -62,6 +62,7 @@ class StatusDef:
     potency: int = 0
     chance: float = 0.0
     incoming_mult: float = 1.0
+    speed_mult: float = 1.0
     base: int = 0
     ramp_per_turn: int = 0
 
@@ -117,6 +118,7 @@ class StatusLibrary:
                     potency=int(row.get("potency", 0) or 0),
                     chance=float(row.get("chance", 0.0) or 0.0),
                     incoming_mult=float(row.get("incoming_mult", 1.0) or 1.0),
+                    speed_mult=float(row.get("speed_mult", 1.0) or 1.0),
                     base=int(row.get("base", 0) or 0),
                     ramp_per_turn=int(row.get("ramp_per_turn", 0) or 0),
                 )
@@ -141,20 +143,16 @@ class ElementLibrary:
         self._triangle = set(triangle)
         self.super_mult = float(super_mult)
         self.resisted_mult = float(resisted_mult)
+        self._by_lower = {k.lower(): k for k in self._elements}
 
     def normalize(self, value: str | None) -> str:
         if not value:
-            return "Neutral"
+            return "Neutral" if "Neutral" in self._elements else (next(iter(self._elements), "Neutral"))
         v = str(value).strip().lower()
-        if v == "air":
-            v = "wind"
-        if v == "fire":
-            return "Fire"
-        if v == "ice":
-            return "Ice"
-        if v == "wind":
-            return "Wind"
-        return "Neutral"
+        if not v:
+            return "Neutral" if "Neutral" in self._elements else (next(iter(self._elements), "Neutral"))
+        v = {"air": "wind"}.get(v, v)
+        return self._by_lower.get(v, "Neutral" if "Neutral" in self._elements else (next(iter(self._elements), "Neutral")))
 
     def icon(self, elem: str) -> str:
         e = self.normalize(elem)
@@ -230,6 +228,7 @@ class Combatant:
 
     hp: Resource = field(default_factory=lambda: Resource(100, 100))
     sp: Resource = field(default_factory=lambda: Resource(50, 50))
+    break_gauge: Resource = field(default_factory=lambda: Resource(0, 100))
 
     attack: int = 14
     defense: int = 6

@@ -246,7 +246,9 @@ def run_gui():
             "Ice > Wind\n"
             "Wind > Fire\n\n"
             "Heavy is a charge: the next turn it hits hard but can miss.\n"
-            "Defend reduces the next incoming hit."
+            "Defend reduces the next incoming hit.\n"
+            "Sunder builds Break and applies Exposed.\n"
+            "When Break fills (💥), the target loses its next turn."
         ),
         style="App.TLabel",
         justify="left",

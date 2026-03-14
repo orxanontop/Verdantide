@@ -172,6 +172,65 @@ class AnimatedBar:
         self._c.coords(self._shine, x1 + 4, y1 + 2, x2 - 4, y1 + 4)
 
 
+class AnimatedRing:
+    """Small circular gauge for secondary meters (Break)."""
+
+    def __init__(
+        self,
+        canvas: tk.Canvas,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        *,
+        width: int = 4,
+        fg: str = "#fbbf24",
+        bg: str = "#263455",
+    ):
+        self._c = canvas
+        self._bbox = (int(x1), int(y1), int(x2), int(y2))
+        self._w = int(width)
+        self._fg = str(fg)
+        self._bg = str(bg)
+
+        self._ratio = 0.0
+        self._target = 0.0
+
+        bx1, by1, bx2, by2 = self._bbox
+        self._ring_bg = canvas.create_oval(bx1, by1, bx2, by2, outline=self._bg, width=self._w)
+        self._ring = canvas.create_arc(
+            bx1,
+            by1,
+            bx2,
+            by2,
+            start=90,
+            extent=0,
+            style="arc",
+            outline=self._fg,
+            width=self._w,
+        )
+
+    def set_ratio_immediate(self, ratio: float) -> None:
+        self._ratio = max(0.0, min(1.0, float(ratio)))
+        self._target = self._ratio
+        self._redraw()
+
+    def set_target_ratio(self, ratio: float) -> None:
+        self._target = max(0.0, min(1.0, float(ratio)))
+
+    def step(self, t: float) -> None:
+        self._ratio = _lerp(self._ratio, self._target, t)
+        self._redraw()
+
+    def _redraw(self) -> None:
+        extent = -max(0.0, min(1.0, self._ratio)) * 359.999
+        try:
+            col = _mix("#60a5fa", self._fg, max(0.0, min(1.0, self._ratio)))
+            self._c.itemconfigure(self._ring, extent=extent, outline=col)
+        except Exception:
+            pass
+
+
 class CombatLog(tk.Frame):
     """Stylized event feed with fade-in and turn separators."""
 
@@ -336,6 +395,10 @@ class UnitPanel(tk.Canvas):
         "poison": "#a78bfa",
         "shield": "#5eead4",
         "charge": "#fbbf24",
+        "broken": "#fbbf24",
+        "exposed": "#f472b6",
+        "haste": "#34d399",
+        "slow": "#94a3b8",
     }
 
     def __init__(self, parent, *, theme: dict[str, str], content: Content, width: int, height: int, portrait: bool):
@@ -363,6 +426,9 @@ class UnitPanel(tk.Canvas):
         self._elem_circle = self.create_oval(width - 54, 16, width - 24, 46, fill="#c9c9d6", outline="#0f172a", width=2)
         self._elem_icon = self.create_text(width - 39, 31, text="◇", fill="#0b0f17", font=("Segoe UI", 11, "bold"))
 
+        # Break gauge ring around the element icon.
+        self.break_ring = AnimatedRing(self, width - 58, 12, width - 20, 50, width=4, fg="#fbbf24", bg=theme["panel_border"])
+
         # bars
         self._hp_text = self.create_text(px, 52, text="", anchor="w", fill=theme["muted"], font=("Segoe UI", 9, "bold"))
         self._sp_text = self.create_text(px, 80, text="", anchor="w", fill=theme["muted"], font=("Segoe UI", 9, "bold"))
@@ -389,9 +455,11 @@ class UnitPanel(tk.Canvas):
         if immediate:
             self.hp_bar.set_ratio_immediate(unit.hp.ratio(), hp_style=True)
             self.sp_bar.set_ratio_immediate(unit.sp.ratio(), hp_style=False)
+            self.break_ring.set_ratio_immediate(unit.break_gauge.ratio())
         else:
             self.hp_bar.set_target_ratio(unit.hp.ratio())
             self.sp_bar.set_target_ratio(unit.sp.ratio())
+            self.break_ring.set_target_ratio(unit.break_gauge.ratio())
 
         for i in self._status_ids:
             self.delete(i)
@@ -413,9 +481,10 @@ class UnitPanel(tk.Canvas):
 class InitiativeBar(tk.Canvas):
     """Horizontal turn order preview (CTB timeline)."""
 
-    def __init__(self, parent, *, theme: dict[str, str], width: int = 420, height: int = 42):
+    def __init__(self, parent, *, theme: dict[str, str], content: Content, width: int = 420, height: int = 42):
         super().__init__(parent, width=width, height=height, bg=theme["bg"], highlightthickness=0)
         self._theme = theme
+        self._content = content
 
     def render(self, engine: BattleEngine, *, count: int = 10) -> None:
         self.delete("all")
@@ -426,12 +495,17 @@ class InitiativeBar(tk.Canvas):
         for i, uid in enumerate(q):
             u = engine.get(uid)
             is_active = i == 0 and uid == active
-            ring = "#fbbf24" if is_active else "#263455"
+            ring = "#fbbf24" if is_active else self._content.elements.color(u.element)
             fill = "#111827" if is_active else "#0f172a"
             self.create_oval(x, 8, x + 28, 36, fill=fill, outline=ring, width=(2 if is_active else 1))
-            ch = "P" if u.team == "player" else "E"
-            col = "#60a5fa" if u.team == "player" else "#fb7185"
-            self.create_text(x + 14, 22, text=ch, fill=col, font=("Segoe UI", 11, "bold"))
+            icon = self._content.elements.icon(u.element)
+            self.create_text(x + 14, 22, text=icon, fill="#e5e7eb", font=("Segoe UI", 12, "bold"))
+
+            # Small intent/status hint.
+            if u.has("broken"):
+                self.create_text(x + 24, 30, text="💥", fill="#fbbf24", font=("Segoe UI", 7, "bold"))
+            elif u.has("charge"):
+                self.create_text(x + 24, 30, text="⚡", fill="#fbbf24", font=("Segoe UI", 7, "bold"))
             x += 36
 # -----------------------------
 # Battle scene
@@ -502,10 +576,10 @@ class BattleUI(ttk.Frame):
 
         ttk.Label(top, text="BATTLE", style="BattleTitle.TLabel").grid(row=0, column=0, sticky="w")
 
-        self.enemy_panel = UnitPanel(top, theme=self.theme, content=self.content, width=420, height=108, portrait=False)
+        self.enemy_panel = UnitPanel(top, theme=self.theme, content=self.content, width=420, height=124, portrait=False)
         self.enemy_panel.grid(row=1, column=0, sticky="w", pady=(10, 0))
 
-        self.timeline = InitiativeBar(top, theme=self.theme, width=420, height=42)
+        self.timeline = InitiativeBar(top, theme=self.theme, content=self.content, width=420, height=42)
         self.timeline.grid(row=1, column=1, sticky="e", padx=(10, 0), pady=(10, 0))
 
         # MID: arena
@@ -528,7 +602,7 @@ class BattleUI(ttk.Frame):
         self.log = CombatLog(bottom, bg=self.theme["panel2"])
         self.log.grid(row=0, column=0, sticky="ew")
 
-        self.player_panel = UnitPanel(bottom, theme=self.theme, content=self.content, width=520, height=118, portrait=True)
+        self.player_panel = UnitPanel(bottom, theme=self.theme, content=self.content, width=520, height=132, portrait=True)
         self.player_panel.grid(row=1, column=0, sticky="w", pady=(10, 0))
 
         self.hint = tk.Label(bottom, text="", bg=self.theme["bg"], fg=self.theme["muted"], font=("Segoe UI", 10, "bold"), anchor="w")
@@ -980,8 +1054,8 @@ class BattleUI(ttk.Frame):
                 b.configure(state="disabled")
             b.grid(row=0, column=col, sticky="ew", padx=8, pady=10)
 
-        mk_item("☉", "Potion", "potion", p_count, "Potion: heal 28 HP.", 0)
-        mk_item("☉", "Ether", "ether", e_count, "Ether: restore 20 SP.", 1)
+        mk_item("🧪", "Potion", "potion", p_count, "Potion: heal 28 HP.", 0)
+        mk_item("🔷", "Ether", "ether", e_count, "Ether: restore 20 SP.", 1)
 
         self.item_menu = m
     # -----------------------------
@@ -996,15 +1070,23 @@ class BattleUI(ttk.Frame):
     def _anchor(self, unit_id: str) -> tuple[int, int]:
         return self._player_anchor if unit_id == "player" else self._enemy_anchor
 
-    def _lunge(self, attacker_id: str, done) -> None:
+    def _lunge(
+        self,
+        attacker_id: str,
+        done,
+        *,
+        target_id: str | None = None,
+        distance: int = 18,
+        duration_ms: int = 180,
+    ) -> None:
         c = self.arena
         sprite = self._sprite_id(attacker_id)
         ax, _ = self._anchor(attacker_id)
-        tx, _ = self._anchor("enemy" if attacker_id == "player" else "player")
+        tx, _ = self._anchor(target_id or ("enemy" if attacker_id == "player" else "player"))
         dir_ = 1 if tx > ax else -1
 
         def upd(t):
-            dx = int(math.sin(t * math.pi) * 18 * dir_)
+            dx = int(math.sin(t * math.pi) * int(distance) * dir_)
             c.move(sprite, dx - getattr(self, "_last_dx", 0), 0)
             self._last_dx = dx
 
@@ -1013,7 +1095,34 @@ class BattleUI(ttk.Frame):
             self._last_dx = 0
             done()
 
-        self.anim.tween(180, upd, end, easing="in_out_quad")
+        self.anim.tween(int(duration_ms), upd, end, easing="in_out_quad")
+
+    def _projectile(self, attacker_id: str, target_id: str, *, color: str, done, kind: str) -> None:
+        c = self.arena
+        ax, ay = self._anchor(attacker_id)
+        tx, ty = self._anchor(target_id)
+        ay -= 34
+        ty -= 34
+
+        r = 7 if kind == "burst" else 6
+        orb = c.create_oval(ax - r, ay - r, ax + r, ay + r, fill=color, outline="", tags=("fx",))
+        trail = c.create_line(ax, ay, ax, ay, fill=_mix(color, "#ffffff", 0.15), width=3, capstyle="round", tags=("fx",))
+
+        def upd(t):
+            # Slight arc for readability.
+            x = int(_lerp(ax, tx, t))
+            arc = math.sin(t * math.pi) * (22 if kind == "burst" else 16)
+            y = int(_lerp(ay, ty, t) - arc)
+            c.coords(orb, x - r, y - r, x + r, y + r)
+            c.coords(trail, ax, ay, x, y)
+            c.itemconfigure(orb, fill=_mix(color, "#ffffff", 0.25 * (1.0 - t)))
+
+        def end():
+            c.delete(orb)
+            c.delete(trail)
+            done()
+
+        self.anim.tween(220 if kind == "burst" else 200, upd, end, easing="in_out_quad")
 
     def _shake(self, target_id: str, done) -> None:
         c = self.arena
@@ -1164,7 +1273,7 @@ class BattleUI(ttk.Frame):
         self.anim.run_sequence(steps, on_done=finish)
 
     def _play_event(self, ev: CombatEvent, done) -> None:
-        # Log first for responsiveness.
+        # Log first for responsiveness (unless silent).
         tag = "system"
         if ev.kind == "turn":
             tag = "turn"
@@ -1173,12 +1282,28 @@ class BattleUI(ttk.Frame):
         elif ev.actor == "enemy":
             tag = "enemy"
 
-        if ev.tag and ev.kind in ("damage", "miss"):
-            self.log.line(f"{ev.text} ({ev.tag})", tag=tag)
-        else:
-            self.log.line(ev.text, tag=tag)
+        silent = bool(ev.meta.get("silent")) if isinstance(ev.meta, dict) else False
+        if (ev.text or "").strip() and not silent:
+            if ev.tag and ev.kind in ("damage", "miss"):
+                self.log.line(f"{ev.text} ({ev.tag})", tag=tag)
+            else:
+                self.log.line(ev.text, tag=tag)
 
         self._refresh_panels(immediate=False)
+
+        def ratio_from(meta: object, cur_key: str, max_key: str) -> float | None:
+            if not isinstance(meta, dict):
+                return None
+            cur = meta.get(cur_key)
+            mx = meta.get(max_key)
+            try:
+                cur_i = int(cur)  # type: ignore[arg-type]
+                mx_i = int(mx)  # type: ignore[arg-type]
+            except Exception:
+                return None
+            if mx_i <= 0:
+                return None
+            return max(0.0, min(1.0, cur_i / mx_i))
 
         if ev.kind == "damage" and ev.target and ev.amount is not None:
             target_id = ev.target
@@ -1199,16 +1324,15 @@ class BattleUI(ttk.Frame):
             is_crit = ("CRIT" in (ev.tag or "")) or (bool(ev.meta.get("crit")) if isinstance(ev.meta, dict) else False)
 
             def after_lunge():
-                if target_id == "player":
-                    self.player_panel.hp_bar.set_target_ratio(self.engine.get("player").hp.ratio())
-                else:
-                    self.enemy_panel.hp_bar.set_target_ratio(self.engine.get("enemy").hp.ratio())
+                ratio = ratio_from(ev.meta, "hp_to", "hp_max")
+                if ratio is None:
+                    ratio = self.engine.get(target_id).hp.ratio()
+
+                panel = self.player_panel if target_id == "player" else self.enemy_panel
+                panel.hp_bar.set_target_ratio(ratio)
 
                 def bar_upd(t):
-                    if target_id == "player":
-                        self.player_panel.hp_bar.step(t, hp_style=True)
-                    else:
-                        self.enemy_panel.hp_bar.step(t, hp_style=True)
+                    panel.hp_bar.step(t, hp_style=True)
 
                 self.anim.tween(250, bar_upd, None)
 
@@ -1234,38 +1358,74 @@ class BattleUI(ttk.Frame):
                 else:
                     hit_fx()
 
-            self._lunge(attacker_id, after_lunge)
+            if anim_kind in ("blast", "burst"):
+                self._projectile(attacker_id, target_id, color=fx_col, done=after_lunge, kind=anim_kind)
+            else:
+                dist = 22 if anim_kind in ("heavy", "sunder") else (12 if anim_kind == "sting" else 18)
+                dur = 200 if anim_kind in ("heavy", "sunder") else (140 if anim_kind == "sting" else 180)
+                self._lunge(attacker_id, after_lunge, target_id=target_id, distance=dist, duration_ms=dur)
             return
 
         if ev.kind == "heal" and ev.target and ev.amount is not None:
             target_id = ev.target
-            if target_id == "player":
-                self.player_panel.hp_bar.set_target_ratio(self.engine.get("player").hp.ratio())
-            else:
-                self.enemy_panel.hp_bar.set_target_ratio(self.engine.get("enemy").hp.ratio())
+            ratio = ratio_from(ev.meta, "hp_to", "hp_max")
+            if ratio is None:
+                ratio = self.engine.get(target_id).hp.ratio()
+
+            panel = self.player_panel if target_id == "player" else self.enemy_panel
+            panel.hp_bar.set_target_ratio(ratio)
 
             def bar_upd(t):
-                if target_id == "player":
-                    self.player_panel.hp_bar.step(t, hp_style=True)
-                else:
-                    self.enemy_panel.hp_bar.step(t, hp_style=True)
+                panel.hp_bar.step(t, hp_style=True)
 
             self.anim.tween(230, bar_upd, None)
             self._float_number(target_id, ev.amount, "#7dffb2", done)
             return
 
-        if ev.kind == "resource" and ev.actor and ev.tag == "sp":
-            uid = ev.actor
-            if uid == "player":
-                self.player_panel.sp_bar.set_target_ratio(self.engine.get("player").sp.ratio())
-                self.anim.tween(230, lambda t: self.player_panel.sp_bar.step(t, hp_style=False), done)
-            else:
-                self.enemy_panel.sp_bar.set_target_ratio(self.engine.get("enemy").sp.ratio())
-                self.anim.tween(230, lambda t: self.enemy_panel.sp_bar.step(t, hp_style=False), done)
+        if ev.kind == "resource" and ev.tag == "sp" and (ev.target or ev.actor):
+            uid = ev.target or ev.actor or "player"
+            ratio = ratio_from(ev.meta, "sp_to", "sp_max")
+            if ratio is None:
+                ratio = self.engine.get(uid).sp.ratio()
+
+            panel = self.player_panel if uid == "player" else self.enemy_panel
+            panel.sp_bar.set_target_ratio(ratio)
+            self.anim.tween(230, lambda t: panel.sp_bar.step(t, hp_style=False), done)
+            return
+
+        if ev.kind == "resource" and ev.tag == "break" and ev.target:
+            uid = ev.target
+            ratio = ratio_from(ev.meta, "break_to", "break_max")
+            if ratio is None:
+                ratio = self.engine.get(uid).break_gauge.ratio()
+
+            panel = self.player_panel if uid == "player" else self.enemy_panel
+            panel.break_ring.set_target_ratio(ratio)
+            self.anim.tween(190, lambda t: panel.break_ring.step(t), done)
             return
 
         if ev.kind == "status" and ev.tag == "shield" and ev.target:
             self._shield_pop(ev.target, done)
+            return
+
+        if ev.kind == "status" and ev.tag == "broken" and ev.target:
+            self._pop_label(ev.target, "BREAK!", "#fbbf24")
+            self._screen_shake(6.0, done)
+            return
+
+        if ev.kind == "status" and ev.tag == "exposed" and ev.target:
+            self._pop_label(ev.target, "EXPOSED", "#f472b6")
+            self.after(110, done)
+            return
+
+        if ev.kind == "status" and ev.tag == "haste" and ev.target:
+            self._pop_label(ev.target, "HASTE", "#34d399")
+            self.after(110, done)
+            return
+
+        if ev.kind == "status" and ev.tag == "slow" and ev.target:
+            self._pop_label(ev.target, "SLOW", "#94a3b8")
+            self.after(110, done)
             return
 
         if ev.kind == "status" and ev.tag == "charge" and ev.target:
@@ -1301,7 +1461,7 @@ def make_default_player(name: str, element: str) -> Combatant:
         attack=15,
         defense=7,
         speed=11,
-        skills=["elemental", "burst", "focus", "heavy_charge"],
+        skills=["elemental", "burst", "focus", "heavy_charge", "sunder", "quick_step"],
     )
 
 
@@ -1316,7 +1476,7 @@ def make_enemy_from_template(tpl: dict) -> Combatant:
 
     skills = tpl.get("skills")
     if not isinstance(skills, list) or not skills:
-        skills = ["elemental", "poison_sting", "heavy_charge"]
+        skills = ["elemental", "poison_sting", "sunder", "heavy_charge"]
 
     return Combatant(
         id="enemy",
