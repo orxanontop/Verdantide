@@ -336,7 +336,19 @@ class Tooltip:
 class ActionButton(tk.Button):
     """Command button with hover glow, click feedback, and disabled-state styling."""
 
-    def __init__(self, parent, *, icon: str, text: str, command, theme: dict[str, str], hint: str = "", on_hint=None, shortcut: str = ""):
+    def __init__(
+        self,
+        parent,
+        *,
+        icon: str,
+        text: str,
+        command,
+        theme: dict[str, str],
+        hint: str = "",
+        hint_fn=None,
+        on_hint=None,
+        shortcut: str = "",
+    ):
         label = f"{icon}  {text}"
         if shortcut:
             label = f"{label}  [{shortcut}]"
@@ -361,6 +373,7 @@ class ActionButton(tk.Button):
         )
         self._theme = theme
         self._hint = hint or ""
+        self._hint_fn = hint_fn
         self._on_hint = on_hint
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
@@ -368,9 +381,17 @@ class ActionButton(tk.Button):
     def _on_enter(self, _evt=None):
         if str(self["state"]) != "disabled":
             self.configure(bg=self._theme["btn_hover"], highlightbackground=self._theme["btn_glow"])
-        if self._on_hint and self._hint:
+        if self._on_hint:
+            hint = self._hint
+            if self._hint_fn:
+                try:
+                    dyn = self._hint_fn()
+                    if dyn:
+                        hint = dyn
+                except Exception:
+                    pass
             try:
-                self._on_hint(self._hint)
+                self._on_hint(hint or "")
             except Exception:
                 pass
 
@@ -398,6 +419,8 @@ class UnitPanel(tk.Canvas):
         "broken": "#fbbf24",
         "exposed": "#f472b6",
         "haste": "#34d399",
+        "fury": "#f97316",
+        "weaken": "#94a3b8",
         "slow": "#94a3b8",
     }
 
@@ -605,7 +628,16 @@ class BattleUI(ttk.Frame):
         self.player_panel = UnitPanel(bottom, theme=self.theme, content=self.content, width=520, height=132, portrait=True)
         self.player_panel.grid(row=1, column=0, sticky="w", pady=(10, 0))
 
-        self.hint = tk.Label(bottom, text="", bg=self.theme["bg"], fg=self.theme["muted"], font=("Segoe UI", 10, "bold"), anchor="w")
+        self.hint = tk.Label(
+            bottom,
+            text="",
+            bg=self.theme["bg"],
+            fg=self.theme["muted"],
+            font=("Segoe UI", 10, "bold"),
+            anchor="w",
+            justify="left",
+            wraplength=900,
+        )
         self.hint.grid(row=2, column=0, sticky="ew", pady=(8, 0))
 
         self.action_bar = tk.Frame(bottom, bg=self.theme["bg"])
@@ -620,6 +652,7 @@ class BattleUI(ttk.Frame):
             command=lambda: self._on_action(Action(kind="attack")),
             theme=self.theme,
             hint="Attack: fast, reliable damage.",
+            hint_fn=lambda: self._action_preview_text(Action(kind="attack")),
             on_hint=self._set_hint,
             shortcut="1",
         )
@@ -640,6 +673,7 @@ class BattleUI(ttk.Frame):
             command=lambda: self._on_action(Action(kind="defend")),
             theme=self.theme,
             hint="Defend: apply a short Shield (reduces next hit).",
+            hint_fn=lambda: self._action_preview_text(Action(kind="defend")),
             on_hint=self._set_hint,
             shortcut="3",
         )
@@ -731,6 +765,19 @@ class BattleUI(ttk.Frame):
             self.hint.configure(text=text or "")
         except Exception:
             pass
+
+    def _action_preview_text(self, action: Action, *, include_title: bool = True) -> str:
+        try:
+            preview = self.engine.preview_action("player", action)
+        except Exception:
+            return ""
+        if not preview:
+            return ""
+        lines = [ln for ln in preview.lines if ln]
+        if not lines:
+            return preview.title if include_title else ""
+        body = " | ".join(lines)
+        return f"{preview.title}\n{body}" if include_title else body
 
     def _refresh_panels(self, *, immediate: bool) -> None:
         if not self.engine.units:
@@ -972,7 +1019,12 @@ class BattleUI(ttk.Frame):
 
             # tooltip + hint
             def on_enter(_e=None):
-                self._set_hint(sd.description or "")
+                preview = self._action_preview_text(Action(kind="skill", skill_id=sid), include_title=False)
+                base = sd.description or ""
+                hint = base
+                if preview:
+                    hint = f"{base}\n{preview}" if base else preview
+                self._set_hint(hint)
                 try:
                     rx = b.winfo_rootx() + 20
                     ry = b.winfo_rooty() - 10
@@ -1046,6 +1098,7 @@ class BattleUI(ttk.Frame):
                 command=lambda: self._on_action(Action(kind="item", item_id=item_id)),
                 theme=self.theme,
                 hint=hint,
+                hint_fn=lambda: self._action_preview_text(Action(kind="item", item_id=item_id), include_title=False),
                 on_hint=self._set_hint,
                 shortcut="",
             )
@@ -1423,6 +1476,16 @@ class BattleUI(ttk.Frame):
             self.after(110, done)
             return
 
+        if ev.kind == "status" and ev.tag == "fury" and ev.target:
+            self._pop_label(ev.target, "FURY", "#f97316")
+            self.after(110, done)
+            return
+
+        if ev.kind == "status" and ev.tag == "weaken" and ev.target:
+            self._pop_label(ev.target, "WEAKEN", "#94a3b8")
+            self.after(110, done)
+            return
+
         if ev.kind == "status" and ev.tag == "slow" and ev.target:
             self._pop_label(ev.target, "SLOW", "#94a3b8")
             self.after(110, done)
@@ -1461,7 +1524,7 @@ def make_default_player(name: str, element: str) -> Combatant:
         attack=15,
         defense=7,
         speed=11,
-        skills=["elemental", "burst", "focus", "heavy_charge", "sunder", "quick_step"],
+        skills=["elemental", "burst", "crippling_slash", "focus", "rally", "heavy_charge", "sunder", "quick_step"],
     )
 
 
@@ -1476,7 +1539,7 @@ def make_enemy_from_template(tpl: dict) -> Combatant:
 
     skills = tpl.get("skills")
     if not isinstance(skills, list) or not skills:
-        skills = ["elemental", "poison_sting", "sunder", "heavy_charge"]
+        skills = ["elemental", "poison_sting", "crippling_slash", "sunder", "heavy_charge", "rally"]
 
     return Combatant(
         id="enemy",

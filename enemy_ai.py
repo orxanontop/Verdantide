@@ -80,6 +80,19 @@ def choose_enemy_action(engine: BattleEngine, actor) -> Action:
         if sd.kind == "support" and actor.hp.ratio() < 0.55:
             w += 1.0
 
+        def applies(status_id: str) -> bool:
+            spec = sd.apply_status
+            if isinstance(spec, list):
+                for row in spec:
+                    if isinstance(row, dict) and str(row.get("id", "")) == status_id:
+                        return True
+            return False
+
+        if applies("weaken") and (not target.has("weaken")):
+            w += 0.8
+        if applies("fury") and (not actor.has("fury")):
+            w += 0.6
+
         # Elemental advantage
         elem = actor.element if sd.element == "auto" else sd.element
         mult, label = engine.content.elements.multiplier(elem, target.element)

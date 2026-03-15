@@ -248,6 +248,8 @@ def run_gui():
             "Heavy is a charge: the next turn it hits hard but can miss.\n"
             "Defend reduces the next incoming hit.\n"
             "Sunder builds Break and applies Exposed.\n"
+            "Rally grants Fury (+damage).\n"
+            "Crippling Slash inflicts Weaken (-damage).\n"
             "When Break fills (💥), the target loses its next turn."
         ),
         style="App.TLabel",

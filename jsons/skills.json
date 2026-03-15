@@ -104,5 +104,34 @@
     "apply_status": [{"id": "haste", "duration": 2, "stacks": 1, "chance": 1.0}],
     "animation": "dash",
     "description": "Gain Haste, acting more often on the timeline."
+  },
+  {
+    "id": "rally",
+    "name": "Rally",
+    "icon": "ðŸ’¢",
+    "kind": "support",
+    "element": "Neutral",
+    "cost_sp": 6,
+    "cooldown": 3,
+    "target": "self",
+    "apply_status": [{"id": "fury", "duration": 2, "stacks": 1, "chance": 1.0}],
+    "animation": "focus",
+    "description": "Rouse yourself, gaining Fury to boost damage."
+  },
+  {
+    "id": "crippling_slash",
+    "name": "Crippling Slash",
+    "icon": "ðŸ”»",
+    "kind": "attack",
+    "element": "Neutral",
+    "base_power": 1.0,
+    "accuracy": 0.95,
+    "break_bonus": 6,
+    "cost_sp": 8,
+    "cooldown": 1,
+    "target": "enemy",
+    "apply_status": [{"id": "weaken", "duration": 2, "stacks": 1, "chance": 0.9}],
+    "animation": "sunder",
+    "description": "A careful strike that weakens the foe's damage."
   }
 ]

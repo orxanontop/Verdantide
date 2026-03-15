@@ -62,6 +62,7 @@ class StatusDef:
     potency: int = 0
     chance: float = 0.0
     incoming_mult: float = 1.0
+    outgoing_mult: float = 1.0
     speed_mult: float = 1.0
     base: int = 0
     ramp_per_turn: int = 0
@@ -118,6 +119,7 @@ class StatusLibrary:
                     potency=int(row.get("potency", 0) or 0),
                     chance=float(row.get("chance", 0.0) or 0.0),
                     incoming_mult=float(row.get("incoming_mult", 1.0) or 1.0),
+                    outgoing_mult=float(row.get("outgoing_mult", 1.0) or 1.0),
                     speed_mult=float(row.get("speed_mult", 1.0) or 1.0),
                     base=int(row.get("base", 0) or 0),
                     ramp_per_turn=int(row.get("ramp_per_turn", 0) or 0),

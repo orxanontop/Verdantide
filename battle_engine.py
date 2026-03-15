@@ -38,6 +38,13 @@ class Action:
 
 
 @dataclass(slots=True)
+class ActionPreview:
+    title: str
+    lines: list[str] = field(default_factory=list)
+    target_id: str | None = None
+
+
+@dataclass(slots=True)
 class Content:
     elements: ElementLibrary
     statuses: StatusLibrary
@@ -153,6 +160,87 @@ class BattleEngine:
         events.extend(self._take_turn("player", action))
         events.extend(self._auto_enemy_until_player(max_steps=8))
         return events
+
+    # ---------
+    # Action preview (UI hinting)
+    # ---------
+
+    def preview_action(self, actor_id: str, action: Action) -> ActionPreview | None:
+        if actor_id not in self.units:
+            return None
+        actor = self.get(actor_id)
+        if not actor.alive():
+            return None
+
+        target: Combatant | None = None
+        if action.kind in ("attack", "skill"):
+            target = self._choose_target(actor, action.target_id)
+
+        lines: list[str] = []
+        title = ""
+
+        if action.kind == "attack":
+            title = "Attack"
+            if target:
+                lines.append(f"Target: {target.name}")
+            lines.extend(
+                self._estimate_damage(
+                    actor,
+                    target,
+                    base_power=1.0,
+                    accuracy=1.0,
+                    element_override="Neutral",
+                    crit_bonus=0.0,
+                    break_bonus=0,
+                )
+            )
+
+        elif action.kind == "defend":
+            title = "Defend"
+            try:
+                shield = self.content.statuses.get("shield")
+                lines.append(f"Gain {shield.name} ({shield.duration}T, x{shield.incoming_mult:.2f} dmg)")
+            except Exception:
+                lines.append("Reduce the next incoming hit.")
+
+        elif action.kind == "item":
+            title = "Item"
+            lines.extend(self._preview_item(action.item_id or "", actor))
+
+        elif action.kind == "skill":
+            try:
+                sd = self.content.skills.get(action.skill_id or "")
+            except Exception:
+                return ActionPreview(title="Skill", lines=["Unknown skill."])
+
+            title = sd.name
+            if sd.kind in ("support", "stance"):
+                if sd.heal > 0:
+                    lines.append(f"Heal +{sd.heal} HP")
+                if sd.gain_sp > 0:
+                    lines.append(f"Gain +{sd.gain_sp} SP")
+                lines.extend(self._preview_status_lines(actor, actor, sd.apply_status))
+            else:
+                if target:
+                    lines.append(f"Target: {target.name}")
+                elem = actor.element if sd.element == "auto" else sd.element
+                lines.extend(
+                    self._estimate_damage(
+                        actor,
+                        target,
+                        base_power=sd.base_power,
+                        accuracy=sd.accuracy,
+                        element_override=elem,
+                        crit_bonus=sd.crit_bonus,
+                        break_bonus=int(getattr(sd, "break_bonus", 0) or 0),
+                    )
+                )
+                lines.extend(self._preview_status_lines(actor, target, sd.apply_status))
+
+        else:
+            title = "Action"
+
+        return ActionPreview(title=title, lines=[ln for ln in lines if ln], target_id=(target.id if target else None))
 
     # ---------
     # Turn resolution
@@ -445,6 +533,7 @@ class BattleEngine:
                         meta={"animation": sd.animation, "sp_to": actor.sp.current, "sp_max": actor.sp.maximum},
                     )
                 )
+            events.extend(self._apply_skill_statuses(actor, actor, sd))
             return events
 
         if sd.kind == "stance":
@@ -509,6 +598,131 @@ class BattleEngine:
 
         return events
 
+    def _preview_status_lines(self, actor: Combatant, target: Combatant | None, spec: object) -> list[str]:
+        lines: list[str] = []
+        if target is None:
+            return lines
+
+        def add_line(status_id: str, duration: int | None, chance: float) -> None:
+            try:
+                defn = self.content.statuses.get(status_id)
+                name = defn.name
+                turns = int(duration if duration is not None else defn.duration)
+            except Exception:
+                name = status_id
+                turns = int(duration or 1)
+            pct = int(round(max(0.0, min(1.0, float(chance))) * 100))
+            verb = "Gain" if target.id == actor.id else "Inflict"
+            lines.append(f"{verb} {name} ({turns}T, {pct}%)")
+
+        if isinstance(spec, str) and spec == "auto_by_element":
+            elem = self.content.elements.normalize(actor.element)
+            if elem == "Fire":
+                add_line("burn", None, 1.0)
+            elif elem == "Ice":
+                add_line("freeze", None, 1.0)
+            elif elem == "Wind":
+                add_line("poison", None, 1.0)
+            return lines
+
+        if isinstance(spec, list):
+            for row in spec:
+                if not isinstance(row, dict):
+                    continue
+                add_line(
+                    str(row.get("id", "")),
+                    duration=(int(row.get("duration")) if row.get("duration") is not None else None),
+                    chance=float(row.get("chance", 1.0) or 1.0),
+                )
+
+        return lines
+
+    def _preview_item(self, item_id: str, user: Combatant) -> list[str]:
+        if item_id == "potion":
+            return [f"Restore 28 HP (x{user.items.get(item_id, 0)})"]
+        if item_id == "ether":
+            return [f"Restore 20 SP (x{user.items.get(item_id, 0)})"]
+        return ["No effect"]
+
+    def _collect_outgoing_mult(self, attacker: Combatant) -> float:
+        mult = 1.0
+        for inst in attacker.statuses.values():
+            if not inst.alive():
+                continue
+            m = float(getattr(inst.defn, "outgoing_mult", 1.0) or 1.0)
+            if m == 1.0:
+                continue
+            mult *= m ** max(1, int(inst.stacks))
+        return mult
+
+    def _collect_incoming_mult(self, defender: Combatant) -> tuple[float, list[str]]:
+        mult = 1.0
+        consume: list[str] = []
+        for sid, inst in defender.statuses.items():
+            if not inst.alive():
+                continue
+            m = float(getattr(inst.defn, "incoming_mult", 1.0) or 1.0)
+            if m == 1.0:
+                continue
+            if inst.defn.type == "shield":
+                mult *= max(0.05, m)
+                consume.append(sid)
+            else:
+                mult *= m ** max(1, int(inst.stacks))
+        return mult, consume
+
+    def _estimate_damage(
+        self,
+        attacker: Combatant,
+        defender: Combatant | None,
+        *,
+        base_power: float,
+        accuracy: float,
+        element_override: str,
+        crit_bonus: float,
+        break_bonus: int,
+    ) -> list[str]:
+        if defender is None or (not attacker.alive()) or (not defender.alive()):
+            return ["No target."]
+
+        acc = max(0.05, min(1.0, float(attacker.accuracy) * float(accuracy)))
+        crit = max(0.0, min(1.0, float(attacker.crit_chance) + float(crit_bonus)))
+
+        base = float(attacker.attack) * float(base_power)
+        base -= float(defender.defense) * 0.55
+        base = max(1.0, base)
+
+        elem_mult, label = self.content.elements.multiplier(element_override, defender.element)
+        incoming_mult, _consume = self._collect_incoming_mult(defender)
+        outgoing_mult = self._collect_outgoing_mult(attacker)
+
+        expected_crit = 1.0 + crit * (float(attacker.crit_mult) - 1.0)
+        est = int(round(base * elem_mult * incoming_mult * outgoing_mult * expected_crit))
+        est = max(1, est)
+
+        break_gain = self._compute_break_gain(est, label, is_crit=False, break_bonus=break_bonus)
+
+        lines = [f"Hit: {int(round(acc * 100))}%"]
+        if crit > 0:
+            lines.append(f"Crit: {int(round(crit * 100))}%")
+        if label:
+            lines.append(label)
+        lines.append(f"Est. Dmg: {est}")
+        if break_gain > 0:
+            lines.append(f"Break +{break_gain}")
+        return lines
+
+    def _compute_break_gain(self, dealt: int, effectiveness: str, *, is_crit: bool, break_bonus: int) -> int:
+        base = 6 + min(14, int(max(0, int(dealt)) * 0.18))
+        if effectiveness == "Super Effective":
+            base += 10
+        elif effectiveness == "Resisted":
+            base = max(0, base - 4)
+        if is_crit:
+            base += 6
+        base += max(0, int(break_bonus))
+        return max(0, int(base))
+
     def _resolve_damage(
         self,
         attacker: Combatant,
@@ -542,27 +756,16 @@ class BattleEngine:
         # Element
         mult, label = self.content.elements.multiplier(element_override, defender.element)
 
-        # Defender incoming damage modifiers (shield consumes on hit).
-        incoming_mult = 1.0
-        consume: list[str] = []
-        for sid, inst in defender.statuses.items():
-            if not inst.alive():
-                continue
-            m = float(getattr(inst.defn, "incoming_mult", 1.0) or 1.0)
-            if m == 1.0:
-                continue
-            if inst.defn.type == "shield":
-                incoming_mult *= max(0.05, m)
-                consume.append(sid)
-            else:
-                incoming_mult *= m ** max(1, int(inst.stacks))
+        # Outgoing + incoming modifiers (shield consumes on hit).
+        outgoing_mult = self._collect_outgoing_mult(attacker)
+        incoming_mult, consume = self._collect_incoming_mult(defender)
 
         # Crit
         is_crit = self._rng.random() < max(0.0, min(1.0, float(attacker.crit_chance) + float(crit_bonus)))
         if is_crit:
             base *= float(attacker.crit_mult)
 
-        dmg = int(round(base * mult * incoming_mult))
+        dmg = int(round(base * mult * incoming_mult * outgoing_mult))
         dmg = max(1, dmg)
         dealt = defender.take_damage(dmg)
 
@@ -614,16 +817,7 @@ class BattleEngine:
         if defender.has("broken"):
             return []
 
-        base = 6 + min(14, int(max(0, int(dealt)) * 0.18))
-        if effectiveness == "Super Effective":
-            base += 10
-        elif effectiveness == "Resisted":
-            base = max(0, base - 4)
-        if is_crit:
-            base += 6
-        base += max(0, int(break_bonus))
-
-        gain = max(0, int(base))
+        gain = self._compute_break_gain(dealt, effectiveness, is_crit=is_crit, break_bonus=break_bonus)
         if gain <= 0:
             return []
 

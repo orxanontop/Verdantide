@@ -72,6 +72,24 @@
     "max_stacks": 1,
     "speed_mult": 1.25
   },
+  "fury": {
+    "name": "Fury",
+    "icon": "ðŸ’¢",
+    "type": "buff",
+    "duration": 2,
+    "stacking": "refresh",
+    "max_stacks": 1,
+    "outgoing_mult": 1.15
+  },
+  "weaken": {
+    "name": "Weaken",
+    "icon": "ðŸ”»",
+    "type": "debuff",
+    "duration": 2,
+    "stacking": "refresh",
+    "max_stacks": 1,
+    "outgoing_mult": 0.85
+  },
   "slow": {
     "name": "Slow",
     "icon": "🕸",
