@@ -116,7 +116,7 @@
   {
     "id": "rally",
     "name": "Rally",
-    "icon": "ðŸ’¢",
+    "icon": "",
     "kind": "support",
     "element": "Neutral",
     "cost_sp": 6,
@@ -130,7 +130,7 @@
   {
     "id": "crippling_slash",
     "name": "Crippling Slash",
-    "icon": "ðŸ”»",
+    "icon": "",
     "kind": "attack",
     "element": "Neutral",
     "base_power": 1.0,
