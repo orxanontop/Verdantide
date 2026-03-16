@@ -38,6 +38,11 @@ class SkillDef:
     cost_sp: int = 0
     cooldown: int = 0
 
+    # Timeline pacing (CTB delay). 1.0 = normal, <1 faster, >1 slower.
+    time_mult: float = 1.0
+    # Pushes target's timeline by a fraction of their base turn time (on hit).
+    timeline_push: float = 0.0
+
     target: str = "enemy"  # enemy|self|ally
     apply_status: object = None  # string alias or list[dict]
     animation: str = "slash"
@@ -86,6 +91,8 @@ class SkillLibrary:
                     gain_sp=int(row.get("gain_sp", 0) or 0),
                     cost_sp=int(row.get("cost_sp", 0) or 0),
                     cooldown=int(row.get("cooldown", 0) or 0),
+                    time_mult=float(row.get("time_mult", 1.0) or 1.0),
+                    timeline_push=float(row.get("timeline_push", 0.0) or 0.0),
                     target=str(row.get("target", "enemy")),
                     apply_status=row.get("apply_status"),
                     animation=str(row.get("animation", "slash")),

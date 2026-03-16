@@ -20,7 +20,7 @@ from skill_system import SkillLibrary, SkillDef
 
 @dataclass(slots=True)
 class CombatEvent:
-    kind: str  # turn|log|action|damage|heal|status|miss|resource
+    kind: str  # turn|log|action|damage|heal|status|miss|resource|timeline|exploit|victory|defeat
     text: str
     actor: str | None = None
     target: str | None = None
@@ -42,6 +42,15 @@ class ActionPreview:
     title: str
     lines: list[str] = field(default_factory=list)
     target_id: str | None = None
+
+
+@dataclass(slots=True)
+class DamageEstimate:
+    hit_chance: float
+    crit_chance: float
+    expected_damage: int
+    break_gain: int
+    effectiveness: str = ""
 
 
 @dataclass(slots=True)
@@ -142,8 +151,28 @@ class BattleEngine:
             mult *= sm ** max(1, int(inst.stacks))
         return max(1, int(round(base * mult)))
 
-    def _advance_clock(self, actor: Combatant) -> None:
-        actor.next_at += 100.0 / self._effective_speed(actor)
+    def _advance_clock(self, actor: Combatant, *, time_mult: float = 1.0) -> None:
+        time_mult = max(0.3, float(time_mult))
+        actor.next_at += (100.0 / self._effective_speed(actor)) * time_mult
+
+    def _action_time_mult(self, action: Action, *, skill: SkillDef | None = None) -> float:
+        if action.kind == "defend":
+            return 0.9
+        if action.kind == "item":
+            return 0.85
+        if action.kind == "skill" and skill is not None:
+            return max(0.5, float(getattr(skill, "time_mult", 1.0) or 1.0))
+        return 1.0
+
+    def _push_timeline(self, target: Combatant, *, push_mult: float) -> int:
+        """Delay target's next turn by a fraction of their base turn time."""
+        push_mult = max(0.0, float(push_mult))
+        if push_mult <= 0.0:
+            return 0
+        delay = int(round((100.0 / self._effective_speed(target)) * push_mult))
+        if delay > 0:
+            target.next_at += float(delay)
+        return delay
 
     # ---------
     # Public turn entrypoint
@@ -179,6 +208,13 @@ class BattleEngine:
         lines: list[str] = []
         title = ""
 
+        def add_timeline_lines(time_mult: float, push_mult: float, *, has_target: bool) -> None:
+            if abs(time_mult - 1.0) >= 0.05:
+                pct = int(round((time_mult - 1.0) * 100))
+                lines.append(f"Timeline: {pct:+d}%")
+            if has_target and push_mult > 0:
+                lines.append(f"Delay target: +{int(round(push_mult * 100))}%")
+
         if action.kind == "attack":
             title = "Attack"
             if target:
@@ -194,6 +230,7 @@ class BattleEngine:
                     break_bonus=0,
                 )
             )
+            add_timeline_lines(self._action_time_mult(action), 0.0, has_target=bool(target))
 
         elif action.kind == "defend":
             title = "Defend"
@@ -202,10 +239,12 @@ class BattleEngine:
                 lines.append(f"Gain {shield.name} ({shield.duration}T, x{shield.incoming_mult:.2f} dmg)")
             except Exception:
                 lines.append("Reduce the next incoming hit.")
+            add_timeline_lines(self._action_time_mult(action), 0.0, has_target=False)
 
         elif action.kind == "item":
             title = "Item"
             lines.extend(self._preview_item(action.item_id or "", actor))
+            add_timeline_lines(self._action_time_mult(action), 0.0, has_target=False)
 
         elif action.kind == "skill":
             try:
@@ -220,6 +259,7 @@ class BattleEngine:
                 if sd.gain_sp > 0:
                     lines.append(f"Gain +{sd.gain_sp} SP")
                 lines.extend(self._preview_status_lines(actor, actor, sd.apply_status))
+                add_timeline_lines(self._action_time_mult(action, skill=sd), 0.0, has_target=False)
             else:
                 if target:
                     lines.append(f"Target: {target.name}")
@@ -236,6 +276,7 @@ class BattleEngine:
                     )
                 )
                 lines.extend(self._preview_status_lines(actor, target, sd.apply_status))
+                add_timeline_lines(self._action_time_mult(action, skill=sd), float(getattr(sd, "timeline_push", 0.0) or 0.0), has_target=bool(target))
 
         else:
             title = "Action"
@@ -281,7 +322,7 @@ class BattleEngine:
 
         # Gentle SP regen to keep pacing snappy (silent UI event animates the bar).
         before_sp = actor.sp.current
-        actor.sp.gain(2)
+        actor.sp.gain(3)
         gained_sp = actor.sp.current - before_sp
         if gained_sp > 0:
             events.append(
@@ -405,15 +446,28 @@ class BattleEngine:
         else:
             events.append(CombatEvent(kind="log", actor=actor.id, text="..."))
 
-        self._advance_clock(actor)
+        time_mult = 1.0
+        if action.kind == "skill":
+            if (action.skill_id or "") == "__heavy_strike__":
+                time_mult = 1.25
+            else:
+                try:
+                    sd = self.content.skills.get(action.skill_id or "")
+                except Exception:
+                    sd = None
+                time_mult = self._action_time_mult(action, skill=sd)
+        else:
+            time_mult = self._action_time_mult(action)
+
+        self._advance_clock(actor, time_mult=time_mult)
         self.active_id = self._next_actor_id()
 
         if self.is_over():
             win = self.winner_team()
             if win == "player":
-                events.append(CombatEvent(kind="log", text="Victory!"))
+                events.append(CombatEvent(kind="victory", text="Victory!"))
             else:
-                events.append(CombatEvent(kind="log", text="Defeat..."))
+                events.append(CombatEvent(kind="defeat", text="Defeat..."))
 
         return events
 
@@ -548,19 +602,35 @@ class BattleEngine:
 
         events.append(CombatEvent(kind="action", actor=actor.id, target=target.id, text=f"{actor.name} uses {sd.name}!", tag=sd.id, meta={"animation": sd.animation}))
         elem = actor.element if sd.element == "auto" else sd.element
-        events.extend(
-            self._resolve_damage(
-                actor,
-                target,
-                base_power=sd.base_power,
-                accuracy=sd.accuracy,
-                element_override=elem,
-                crit_bonus=sd.crit_bonus,
-                animation=sd.animation,
-                break_bonus=int(getattr(sd, "break_bonus", 0) or 0),
-            )
+        dmg_events = self._resolve_damage(
+            actor,
+            target,
+            base_power=sd.base_power,
+            accuracy=sd.accuracy,
+            element_override=elem,
+            crit_bonus=sd.crit_bonus,
+            animation=sd.animation,
+            break_bonus=int(getattr(sd, "break_bonus", 0) or 0),
         )
+        events.extend(dmg_events)
         events.extend(self._apply_skill_statuses(actor, target, sd))
+
+        if dmg_events and any(ev.kind == "damage" for ev in dmg_events):
+            push_mult = float(getattr(sd, "timeline_push", 0.0) or 0.0)
+            if push_mult > 0.0:
+                delay = self._push_timeline(target, push_mult=push_mult)
+                if delay > 0:
+                    events.append(
+                        CombatEvent(
+                            kind="timeline",
+                            actor=actor.id,
+                            target=target.id,
+                            amount=delay,
+                            text=f"{target.name} is delayed!",
+                            tag="delay",
+                            meta={"delay": delay},
+                        )
+                    )
         return events
 
     def _apply_skill_statuses(self, actor: Combatant, target: Combatant, sd: SkillDef) -> list[CombatEvent]:
@@ -594,9 +664,38 @@ class BattleEngine:
                     duration=(int(row.get("duration")) if row.get("duration") is not None else None),
                     stacks=int(row.get("stacks", 1) or 1),
                     chance=float(row.get("chance", 1.0) or 1.0),
-                )
+            )
 
         return events
+
+    def _compute_exploit_bonus(
+        self,
+        attacker: Combatant,
+        defender: Combatant,
+        element: str,
+        base_damage: int,
+    ) -> tuple[int, str]:
+        """Calculate exploit bonus for hitting elemental weakness."""
+        mult, label = self.content.elements.multiplier(element, defender.element)
+        
+        if label == "Super Effective":
+            bonus = int(base_damage * 0.5)
+            return bonus, "exploit"
+        
+        return 0, ""
+
+    def _compute_break_exploit(
+        self,
+        attacker: Combatant,
+        defender: Combatant,
+        element: str,
+        base_break: int,
+    ) -> int:
+        """Calculate additional break gauge gain from exploits."""
+        mult, label = self.content.elements.multiplier(element, defender.element)
+        if label == "Super Effective":
+            return int(base_break * 0.5)
+        return 0
 
     def _preview_status_lines(self, actor: Combatant, target: Combatant | None, spec: object) -> list[str]:
         lines: list[str] = []
@@ -655,6 +754,17 @@ class BattleEngine:
             mult *= m ** max(1, int(inst.stacks))
         return mult
 
+    def _collect_break_gain_mult(self, attacker: Combatant) -> float:
+        mult = 1.0
+        for inst in attacker.statuses.values():
+            if not inst.alive():
+                continue
+            m = float(getattr(inst.defn, "break_gain_mult", 1.0) or 1.0)
+            if m == 1.0:
+                continue
+            mult *= m ** max(1, int(inst.stacks))
+        return mult
+
     def _collect_incoming_mult(self, defender: Combatant) -> tuple[float, list[str]]:
         mult = 1.0
         consume: list[str] = []
@@ -671,6 +781,65 @@ class BattleEngine:
                 mult *= m ** max(1, int(inst.stacks))
         return mult, consume
 
+    def _collect_break_taken_mult(self, defender: Combatant) -> float:
+        mult = 1.0
+        for inst in defender.statuses.values():
+            if not inst.alive():
+                continue
+            m = float(getattr(inst.defn, "break_taken_mult", 1.0) or 1.0)
+            if m == 1.0:
+                continue
+            mult *= m ** max(1, int(inst.stacks))
+        return mult
+
+    def estimate_damage(
+        self,
+        attacker: Combatant,
+        defender: Combatant | None,
+        *,
+        base_power: float,
+        accuracy: float,
+        element_override: str,
+        crit_bonus: float,
+        break_bonus: int,
+    ) -> DamageEstimate:
+        if defender is None or (not attacker.alive()) or (not defender.alive()):
+            return DamageEstimate(0.0, 0.0, 0, 0, "")
+
+        acc = max(0.05, min(1.0, float(attacker.accuracy) * float(accuracy)))
+        crit = max(0.0, min(1.0, float(attacker.crit_chance) + float(crit_bonus)))
+
+        base = float(attacker.attack) * float(base_power)
+        base -= float(defender.defense) * 0.55
+        base = max(1.0, base)
+
+        elem_mult, label = self.content.elements.multiplier(element_override, defender.element)
+        
+        # Calculate potential exploit bonus
+        exploit_bonus = 0
+        if label == "Super Effective":
+            exploit_bonus = int(base * elem_mult * 0.5)
+        
+        incoming_mult, _consume = self._collect_incoming_mult(defender)
+        outgoing_mult = self._collect_outgoing_mult(attacker)
+
+        expected_crit = 1.0 + crit * (float(attacker.crit_mult) - 1.0)
+        est = int(round(base * elem_mult * incoming_mult * outgoing_mult * expected_crit))
+        est = max(1, est)
+        
+        # Include exploit in estimate
+        est_with_exploit = est + exploit_bonus
+
+        break_gain_mult = self._collect_break_gain_mult(attacker)
+        break_taken_mult = self._collect_break_taken_mult(defender)
+        break_gain = self._compute_break_gain(est, label, is_crit=False, break_bonus=break_bonus, break_gain_mult=break_gain_mult, break_taken_mult=break_taken_mult)
+        
+        # Add break exploit bonus
+        if label == "Super Effective":
+            break_gain += int(break_gain * 0.5)
+
+        return DamageEstimate(acc, crit, est_with_exploit, break_gain, label)
+
     def _estimate_damage(
         self,
         attacker: Combatant,
@@ -685,43 +854,47 @@ class BattleEngine:
         if defender is None or (not attacker.alive()) or (not defender.alive()):
             return ["No target."]
 
-        acc = max(0.05, min(1.0, float(attacker.accuracy) * float(accuracy)))
-        crit = max(0.0, min(1.0, float(attacker.crit_chance) + float(crit_bonus)))
+        est = self.estimate_damage(
+            attacker,
+            defender,
+            base_power=base_power,
+            accuracy=accuracy,
+            element_override=element_override,
+            crit_bonus=crit_bonus,
+            break_bonus=break_bonus,
+        )
 
-        base = float(attacker.attack) * float(base_power)
-        base -= float(defender.defense) * 0.55
-        base = max(1.0, base)
-
-        elem_mult, label = self.content.elements.multiplier(element_override, defender.element)
-        incoming_mult, _consume = self._collect_incoming_mult(defender)
-        outgoing_mult = self._collect_outgoing_mult(attacker)
-
-        expected_crit = 1.0 + crit * (float(attacker.crit_mult) - 1.0)
-        est = int(round(base * elem_mult * incoming_mult * outgoing_mult * expected_crit))
-        est = max(1, est)
-
-        break_gain = self._compute_break_gain(est, label, is_crit=False, break_bonus=break_bonus)
-
-        lines = [f"Hit: {int(round(acc * 100))}%"]
-        if crit > 0:
-            lines.append(f"Crit: {int(round(crit * 100))}%")
-        if label:
-            lines.append(label)
-        lines.append(f"Est. Dmg: {est}")
-        if break_gain > 0:
-            lines.append(f"Break +{break_gain}")
+        lines = [f"Hit: {int(round(est.hit_chance * 100))}%"]
+        if est.crit_chance > 0:
+            lines.append(f"Crit: {int(round(est.crit_chance * 100))}%")
+        if est.effectiveness:
+            lines.append(est.effectiveness)
+        lines.append(f"Est. Dmg: {est.expected_damage}")
+        if est.break_gain > 0:
+            lines.append(f"Break +{est.break_gain}")
         return lines
 
-    def _compute_break_gain(self, dealt: int, effectiveness: str, *, is_crit: bool, break_bonus: int) -> int:
-        base = 6 + min(14, int(max(0, int(dealt)) * 0.18))
+    def _compute_break_gain(
+        self,
+        dealt: int,
+        effectiveness: str,
+        *,
+        is_crit: bool,
+        break_bonus: int,
+        break_gain_mult: float = 1.0,
+        break_taken_mult: float = 1.0,
+    ) -> int:
+        base = 8 + min(18, int(max(0, int(dealt)) * 0.22))
         if effectiveness == "Super Effective":
-            base += 10
+            base += 12
         elif effectiveness == "Resisted":
             base = max(0, base - 4)
         if is_crit:
             base += 6
         base += max(0, int(break_bonus))
-        return max(0, int(base))
+
+        mult = max(0.0, float(break_gain_mult)) * max(0.0, float(break_taken_mult))
+        return max(0, int(round(base * mult)))
 
     def _resolve_damage(
         self,
@@ -759,6 +932,8 @@ class BattleEngine:
         # Outgoing + incoming modifiers (shield consumes on hit).
         outgoing_mult = self._collect_outgoing_mult(attacker)
         incoming_mult, consume = self._collect_incoming_mult(defender)
+        break_gain_mult = self._collect_break_gain_mult(attacker)
+        break_taken_mult = self._collect_break_taken_mult(defender)
 
         # Crit
         is_crit = self._rng.random() < max(0.0, min(1.0, float(attacker.crit_chance) + float(crit_bonus)))
@@ -767,7 +942,23 @@ class BattleEngine:
 
         dmg = int(round(base * mult * incoming_mult * outgoing_mult))
         dmg = max(1, dmg)
-        dealt = defender.take_damage(dmg)
+        
+        # Apply exploit bonus for elemental weakness
+        exploit_bonus, exploit_tag = self._compute_exploit_bonus(attacker, defender, element_override, dmg)
+        if exploit_bonus > 0:
+            dmg += exploit_bonus
+            dealt = defender.take_damage(exploit_bonus)
+            events.append(CombatEvent(
+                kind="exploit",
+                actor=attacker.id,
+                target=defender.id,
+                amount=exploit_bonus,
+                text=f"Exploit! +{exploit_bonus} bonus damage!",
+                tag=exploit_tag,
+                meta={"exploit_damage": exploit_bonus},
+            ))
+        else:
+            dealt = defender.take_damage(dmg)
 
         for sid in consume:
             defender.remove_status(sid)
@@ -777,6 +968,8 @@ class BattleEngine:
             tag = label
         if is_crit:
             tag = (tag + " | " if tag else "") + "CRIT"
+        if exploit_tag:
+            tag = (tag + " | " if tag else "") + "EXPLOIT"
 
         events.append(
             CombatEvent(
@@ -797,7 +990,19 @@ class BattleEngine:
         )
 
         # Break gauge build-up (separate resource events so UI can animate deterministically).
-        events.extend(self._apply_break(attacker, defender, dealt=dealt, effectiveness=label, is_crit=is_crit, break_bonus=break_bonus))
+        events.extend(
+            self._apply_break(
+                attacker,
+                defender,
+                dealt=dealt,
+                effectiveness=label,
+                is_crit=is_crit,
+                break_bonus=break_bonus,
+                break_gain_mult=break_gain_mult,
+                break_taken_mult=break_taken_mult,
+                element_override=element_override,
+            )
+        )
         return events
 
     def _apply_break(
@@ -809,6 +1014,9 @@ class BattleEngine:
         effectiveness: str,
         is_crit: bool,
         break_bonus: int,
+        break_gain_mult: float = 1.0,
+        break_taken_mult: float = 1.0,
+        element_override: str = "Neutral",
     ) -> list[CombatEvent]:
         if not defender.alive() or defender.break_gauge.maximum <= 0:
             return []
@@ -817,7 +1025,19 @@ class BattleEngine:
         if defender.has("broken"):
             return []
 
-        gain = self._compute_break_gain(dealt, effectiveness, is_crit=is_crit, break_bonus=break_bonus)
+        gain = self._compute_break_gain(
+            dealt,
+            effectiveness,
+            is_crit=is_crit,
+            break_bonus=break_bonus,
+            break_gain_mult=break_gain_mult,
+            break_taken_mult=break_taken_mult,
+        )
+        
+        # Add exploit bonus to break gauge
+        if effectiveness == "Super Effective":
+            exploit_break = self._compute_break_exploit(attacker, defender, element_override, gain)
+            gain += exploit_break
         if gain <= 0:
             return []
 

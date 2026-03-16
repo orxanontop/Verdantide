@@ -48,13 +48,26 @@ def _mix(c1: str, c2: str, t: float) -> str:
     return _rgb_to_hex((int(_lerp(r1, r2, t)), int(_lerp(g1, g2, t)), int(_lerp(b1, b2, t))))
 
 
-def _hp_color(ratio: float) -> str:
+def _hp_color(ratio: float, *, warning: bool = False) -> str:
     ratio = max(0.0, min(1.0, ratio))
     if ratio >= 0.55:
         return _mix("#ffcd4a", "#49ff9a", (ratio - 0.55) / 0.45)
     if ratio >= 0.25:
         return _mix("#ff4d4d", "#ffcd4a", (ratio - 0.25) / 0.30)
+    if warning and ratio <= 0.25:
+        return "#ff2222"
     return "#ff4d4d"
+
+
+def _hp_color_animated(ratio: float, time_ms: int = 0) -> str:
+    ratio = max(0.0, min(1.0, ratio))
+    if ratio > 0.25:
+        return _hp_color(ratio)
+    
+    pulse = math.sin(time_ms * 0.008) * 0.3 + 0.7
+    base = _hp_color(0.25)
+    warning = "#ff2222"
+    return _mix(base, warning, pulse)
 
 
 def _round_rect_points(x1: int, y1: int, x2: int, y2: int, r: int) -> list[int]:
@@ -518,17 +531,29 @@ class InitiativeBar(tk.Canvas):
         for i, uid in enumerate(q):
             u = engine.get(uid)
             is_active = i == 0 and uid == active
-            ring = "#fbbf24" if is_active else self._content.elements.color(u.element)
-            fill = "#111827" if is_active else "#0f172a"
+            
+            # Highlight active turn with glow effect
+            if is_active:
+                self.create_oval(x - 2, 6, x + 30, 38, fill="", outline="#fbbf24", width=3)
+                ring = "#fbbf24"
+                fill = "#1a1f2e"
+            else:
+                ring = self._content.elements.color(u.element)
+                fill = "#0f172a"
+            
             self.create_oval(x, 8, x + 28, 36, fill=fill, outline=ring, width=(2 if is_active else 1))
             icon = self._content.elements.icon(u.element)
             self.create_text(x + 14, 22, text=icon, fill="#e5e7eb", font=("Segoe UI", 12, "bold"))
 
-            # Small intent/status hint.
+            # Small intent/status hint with better visibility
             if u.has("broken"):
-                self.create_text(x + 24, 30, text="💥", fill="#fbbf24", font=("Segoe UI", 7, "bold"))
+                self.create_text(x + 14, 38, text="BROKEN", fill="#fbbf24", font=("Segoe UI", 6, "bold"))
             elif u.has("charge"):
-                self.create_text(x + 24, 30, text="⚡", fill="#fbbf24", font=("Segoe UI", 7, "bold"))
+                self.create_text(x + 14, 38, text="CHARGE", fill="#fbbf24", font=("Segoe UI", 6, "bold"))
+            elif u.has("shield"):
+                self.create_text(x + 14, 38, text="SHIELD", fill="#5eead4", font=("Segoe UI", 6, "bold"))
+            elif u.has("freeze"):
+                self.create_text(x + 14, 38, text="FROZEN", fill="#60a5fa", font=("Segoe UI", 6, "bold"))
             x += 36
 # -----------------------------
 # Battle scene
@@ -597,7 +622,11 @@ class BattleUI(ttk.Frame):
         top.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 10))
         top.columnconfigure(1, weight=1)
 
-        ttk.Label(top, text="BATTLE", style="BattleTitle.TLabel").grid(row=0, column=0, sticky="w")
+        title_frame = ttk.Frame(top, style="Battle.TFrame")
+        title_frame.grid(row=0, column=0, sticky="w")
+        ttk.Label(title_frame, text="BATTLE", style="BattleTitle.TLabel").grid(row=0, column=0, sticky="w")
+        self.turn_counter = ttk.Label(title_frame, text="Turn 1", style="BattleTitle.TLabel", foreground="#9aa6be")
+        self.turn_counter.grid(row=0, column=1, sticky="w", padx=(20, 0))
 
         self.enemy_panel = UnitPanel(top, theme=self.theme, content=self.content, width=420, height=124, portrait=False)
         self.enemy_panel.grid(row=1, column=0, sticky="w", pady=(10, 0))
@@ -693,9 +722,25 @@ class BattleUI(ttk.Frame):
         self.btn_defend.grid(row=0, column=2, sticky="ew", padx=10)
         self.btn_item.grid(row=0, column=3, sticky="ew", padx=(10, 0))
 
+        # Keyboard shortcut hint bar
+        hint_bar = tk.Frame(bottom, bg=self.theme["bg"])
+        hint_bar.grid(row=4, column=0, sticky="ew", pady=(6, 0))
+        for i in range(4):
+            hint_bar.columnconfigure(i, weight=1)
+        
+        shortcuts = [("1", "Attack"), ("2", "Skill"), ("3", "Defend"), ("4", "Item")]
+        for i, (key, action) in enumerate(shortcuts):
+            tk.Label(
+                hint_bar,
+                text=f"[{key}] {action}",
+                bg=self.theme["bg"],
+                fg=self.theme["muted"],
+                font=("Segoe UI", 8),
+            ).grid(row=0, column=i, sticky="ew")
+
         # Overlay row for submenus (skills/items)
         self.menu_overlay = tk.Frame(bottom, bg=self.theme["bg"])
-        self.menu_overlay.grid(row=4, column=0, sticky="ew")
+        self.menu_overlay.grid(row=5, column=0, sticky="ew")
         self.menu_overlay.columnconfigure(0, weight=1)
 
         self.skill_menu: tk.Frame | None = None
@@ -719,6 +764,46 @@ class BattleUI(ttk.Frame):
         self.log.line("A foe emerges from the forest.", tag="turn")
         self._announce_turn()
         self._bind_shortcuts_once()
+
+    def _restart_battle(self) -> None:
+        """Restart the battle with a new enemy."""
+        import random
+        try:
+            enemies_data = []
+            try:
+                import json
+                with open("jsons/enemies.json", "r", encoding="utf-8") as f:
+                    enemies_data = json.load(f)
+            except Exception:
+                pass
+            
+            # Get current player to reuse their stats
+            player = self.engine.get("player")
+            
+            # Reset player HP and SP
+            player.hp.current = player.hp.maximum
+            player.sp.current = player.sp.maximum
+            player.statuses.clear()
+            player.cooldowns.clear()
+            player.next_at = 0.0
+            
+            # Create new enemy
+            if enemies_data:
+                enemy_tpl = random.choice(enemies_data)
+                enemy = make_enemy_from_template(enemy_tpl)
+            else:
+                enemy = make_enemy_from_template({"name": "Bandit", "element": "Wind", "hp": 90})
+            
+            # Reset break gauge
+            enemy.break_gauge.current = 0
+            
+            # Start new battle
+            self.start_battle(player, enemy)
+            self.log.line("New battle begins!", tag="turn")
+            
+        except Exception as e:
+            print(f"Restart error: {e}")
+            self.log.line("Failed to restart. Please close and reopen.", tag="system")
 
     def _bind_shortcuts_once(self) -> None:
         if self._shortcuts_bound:
@@ -799,6 +884,11 @@ class BattleUI(ttk.Frame):
         if self.engine.is_over():
             self._set_controls_enabled(False)
             return
+        
+        # Update turn counter
+        turn = self.engine.turn_index
+        self.turn_counter.configure(text=f"Turn {turn}")
+        
         if self.engine.active_id == "player":
             if self.engine.get("player").has("charge"):
                 self.log.line("Charge ready: Heavy Strike will trigger.", tag="turn")
@@ -806,6 +896,7 @@ class BattleUI(ttk.Frame):
                 self.log.line("Your move.", tag="turn")
         else:
             self.log.line("Enemy acts...", tag="turn")
+            self._telegraph_attack(self.engine.active_id, lambda: None)
 
     # -----------------------------
     # Background / ambience
@@ -994,7 +1085,9 @@ class BattleUI(ttk.Frame):
             cd = actor.cooldown(sid)
             enabled = (cd <= 0) and (actor.sp.current >= sd.cost_sp)
 
-            label = f"{sd.icon}  {sd.name}\nSP {sd.cost_sp}  |  CD {cd}" if cd > 0 else f"{sd.icon}  {sd.name}\nSP {sd.cost_sp}"
+            tm = float(getattr(sd, "time_mult", 1.0) or 1.0)
+            tm_tag = f"  |  T {tm:.2f}" if abs(tm - 1.0) >= 0.05 else ""
+            label = f"{sd.icon}  {sd.name}\nSP {sd.cost_sp}  |  CD {cd}{tm_tag}" if cd > 0 else f"{sd.icon}  {sd.name}\nSP {sd.cost_sp}{tm_tag}"
 
             b = tk.Button(
                 m,
@@ -1299,6 +1392,108 @@ class BattleUI(ttk.Frame):
             except Exception:
                 pass
 
+    def _show_victory_effect(self, done) -> None:
+        """Celebration effect when player wins."""
+        c = self.arena
+        w = int(c["width"])
+        h = int(c["height"])
+        
+        # Golden glow overlay
+        glow = c.create_rectangle(0, 0, w, h, fill="", outline="", tags=("fx",))
+        
+        # Victory text
+        txt = c.create_text(w // 2, h // 2, text="VICTORY!", fill="#fbbf24", font=("Segoe UI", 36, "bold"), tags=("fx",))
+        
+        def upd(t):
+            # Pulse the text
+            scale = 1.0 + math.sin(t * math.pi * 2) * 0.1
+            c.itemconfigure(txt, fill=_mix("#fbbf24", "#ffffff", t * 0.5))
+        
+        def end():
+            c.delete(glow)
+            c.delete(txt)
+            done()
+        
+        self.anim.tween(600, upd, end)
+
+    def _show_defeat_effect(self, done) -> None:
+        """Somber effect when player loses."""
+        c = self.arena
+        w = int(c["width"])
+        h = int(c["height"])
+        
+        # Dark overlay
+        overlay = c.create_rectangle(0, 0, w, h, fill="#000000", outline="", tags=("fx",))
+        c.itemconfigure(overlay, stipple="gray50")
+        
+        txt = c.create_text(w // 2, h // 2, text="DEFEAT...", fill="#6b7280", font=("Segoe UI", 36, "bold"), tags=("fx",))
+        
+        def upd(t):
+            c.itemconfigure(overlay, fill=_mix("#000000", "#1f2937", t))
+        
+        def end():
+            c.delete(overlay)
+            c.delete(txt)
+            done()
+        
+        self.anim.tween(500, upd, end)
+
+    def _telegraph_attack(self, unit_id: str, done) -> None:
+        """Telegraph that a unit is about to act - shake + outline glow."""
+        c = self.arena
+        sprite = self._sprite_id(unit_id)
+        if not sprite:
+            done()
+            return
+        
+        x, y = self._anchor(unit_id)
+        
+        # Create warning ring
+        r = 52
+        ring = c.create_oval(x - r, y - r, x + r, y + r, fill="", outline="#fbbf24", width=2, tags=("fx", "telegraph"))
+        
+        def upd(t):
+            # Pulse the ring
+            pulse = math.sin(t * math.pi * 3) * 0.3 + 0.7
+            c.itemconfigure(ring, outline=_mix("#fbbf24", "#ff6b5a", t))
+        
+        def end():
+            c.delete(ring)
+            done()
+        
+        self.anim.tween(400, upd, end)
+
+    def _particle_burst(self, target_id: str, color: str, done, *, count: int = 8) -> None:
+        """Particle burst effect on elemental hit."""
+        c = self.arena
+        x, y = self._anchor(target_id)
+        y -= 34
+        
+        particles = []
+        for i in range(count):
+            angle = (math.pi * 2 * i) / count
+            r = 4 + (i % 3) * 2
+            px = x + math.cos(angle) * 8
+            py = y + math.sin(angle) * 8
+            p = c.create_oval(px - r, py - r, px + r, py + r, fill=color, outline="", tags=("fx",))
+            particles.append((p, angle, 28 + (i % 4) * 6))
+        
+        def upd(t):
+            for p, angle, dist in particles:
+                dx = math.cos(angle) * dist * t
+                dy = math.sin(angle) * dist * t - (t * 20)
+                orig_x, orig_y = self._anchor(target_id)
+                orig_y -= 34
+                c.coords(p, orig_x + dx - 3, orig_y + dy - 3, orig_x + dx + 3, orig_y + dy + 3)
+                c.itemconfigure(p, fill=_mix(color, self.theme["bg"], t * 0.8))
+        
+        def end():
+            for p, _, _ in particles:
+                c.delete(p)
+            done()
+        
+        self.anim.tween(300, upd, end)
+
     # -----------------------------
     # Event playback
     # -----------------------------
@@ -1320,6 +1515,15 @@ class BattleUI(ttk.Frame):
             self._busy = False
             self._refresh_panels(immediate=True)
             self._refresh_timeline()
+            
+            # Check if battle is over and trigger restart
+            if self.engine.is_over():
+                winner = self.engine.winner_team()
+                if winner:
+                    self.log.line("Restarting battle in 3 seconds...", tag="system")
+                    self.after(3000, self._restart_battle)
+                return
+            
             self._set_controls_enabled(self.engine.active_id == "player" and not self.engine.is_over())
             self._announce_turn()
 
@@ -1392,6 +1596,7 @@ class BattleUI(ttk.Frame):
                 if ev.tag:
                     if "Super Effective" in ev.tag:
                         self._pop_label(target_id, "Super Effective!", "#fbbf24")
+                        self._particle_burst(target_id, fx_col, lambda: None)
                     elif "Resisted" in ev.tag:
                         self._pop_label(target_id, "Resisted", "#93c5fd")
                     if "CRIT" in ev.tag:
@@ -1494,6 +1699,25 @@ class BattleUI(ttk.Frame):
         if ev.kind == "status" and ev.tag == "charge" and ev.target:
             self._pop_label(ev.target, "CHARGING", "#fbbf24")
             self.after(90, done)
+            return
+
+        if ev.kind == "timeline" and ev.target:
+            self._pop_label(ev.target, "DELAY", "#93c5fd")
+            self.after(110, done)
+            return
+
+        if ev.kind == "exploit" and ev.target and ev.amount is not None:
+            target_id = ev.target
+            self._pop_label(target_id, f"EXPLOIT! +{ev.amount}", "#fbbf24")
+            self._flash(target_id, lambda: self._shake(target_id, done), color="#fbbf24")
+            return
+
+        if ev.kind == "victory":
+            self._show_victory_effect(done)
+            return
+
+        if ev.kind == "defeat":
+            self._show_defeat_effect(done)
             return
 
         if ev.kind == "miss" and ev.target:

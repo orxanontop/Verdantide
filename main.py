@@ -201,41 +201,19 @@ def run_gui():
     characters_data = read_json(base_dir / MAINCHARACTERS_FILE, default=[])
     elem_data = read_json(base_dir / ADVANTAGE_FILE, default=[])
 
-    # Layout: left (setup), right (battle)
+    # Layout: left (tips), right (battle)
     main = ttk.Frame(root, style="App.TFrame")
     main.pack(fill="both", expand=True)
 
     left = ttk.Frame(main, style="App.TFrame")
     right = ttk.Frame(main, style="App.TFrame")
-    left.pack(side="left", fill="y", padx=14, pady=14)
+    left.configure(width=260)
+    left.pack(side="left", fill="y", padx=12, pady=14)
+    left.pack_propagate(False)
     right.pack(side="right", fill="both", expand=True, padx=14, pady=14)
-
-    ttk.Label(left, text="Party Setup", style="AppTitle.TLabel").pack(anchor="w", pady=(0, 10))
-
-    setup = ttk.LabelFrame(left, text="Hero", style="Panel.TLabelframe")
-    setup.pack(fill="x", pady=(0, 10))
 
     hero_names = [c.get("name", "Hero") for c in characters_data] or ["Hero"]
     elem_names = [e.get("element", "Neutral") for e in elem_data] or ["Fire", "Ice", "Wind"]
-
-    hero_name_var = tk.StringVar(value=hero_names[0])
-    hero_elem_var = tk.StringVar(value="Fire")
-
-    ttk.Label(setup, text="Name", style="App.TLabel").grid(row=0, column=0, sticky="w", padx=10, pady=(10, 4))
-    hero_name = ttk.Combobox(setup, textvariable=hero_name_var, values=hero_names, state="readonly", width=22)
-    hero_name.grid(row=0, column=1, sticky="ew", padx=10, pady=(10, 4))
-
-    ttk.Label(setup, text="Element", style="App.TLabel").grid(row=1, column=0, sticky="w", padx=10, pady=4)
-    hero_elem = ttk.Combobox(
-        setup,
-        textvariable=hero_elem_var,
-        values=sorted(set(elem_names + ["Fire", "Ice", "Wind"])),
-        state="readonly",
-        width=22,
-    )
-    hero_elem.grid(row=1, column=1, sticky="ew", padx=10, pady=4)
-
-    setup.columnconfigure(1, weight=1)
 
     info = ttk.LabelFrame(left, text="Tips", style="Panel.TLabelframe")
     info.pack(fill="x", pady=(0, 10))
@@ -254,6 +232,7 @@ def run_gui():
         ),
         style="App.TLabel",
         justify="left",
+        wraplength=220,
     ).pack(anchor="w", padx=10, pady=10)
 
     battle = BattleUI(right)
@@ -263,24 +242,11 @@ def run_gui():
         try:
             enemy_tpl = random.choice(enemies_data) if enemies_data else {"name": "Bandit", "element": "Air", "hp": 90}
             battle.start_battle(
-                make_default_player(hero_name_var.get(), hero_elem_var.get()),
+                make_default_player(random.choice(hero_names), random.choice(elem_names or ["Fire", "Ice", "Wind"])),
                 make_enemy_from_template(enemy_tpl),
             )
         except Exception as e:
             messagebox.showerror("Battle Error", str(e))
-
-    btns = ttk.Frame(left, style="App.TFrame")
-    btns.pack(fill="x")
-
-    ttk.Button(btns, text="New Encounter", command=start_encounter, style="App.TButton").pack(fill="x", pady=(0, 8))
-
-    def randomize_hero():
-        if hero_names:
-            hero_name_var.set(random.choice(hero_names))
-        hero_elem_var.set(random.choice(["Fire", "Ice", "Wind"]))
-        start_encounter()
-
-    ttk.Button(btns, text="Randomize Hero", command=randomize_hero, style="App.TButton").pack(fill="x")
 
     # Kick off a first encounter.
     start_encounter()

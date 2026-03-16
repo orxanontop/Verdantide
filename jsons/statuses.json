@@ -34,7 +34,8 @@
     "duration": 1,
     "stacking": "refresh",
     "max_stacks": 1,
-    "incoming_mult": 0.6
+    "incoming_mult": 0.6,
+    "break_taken_mult": 0.7
   },
   "charge": {
     "name": "Charge",
@@ -52,7 +53,8 @@
     "stacking": "refresh",
     "max_stacks": 1,
     "chance": 1.0,
-    "incoming_mult": 1.25
+    "incoming_mult": 1.25,
+    "break_taken_mult": 1.3
   },
   "exposed": {
     "name": "Exposed",
@@ -61,7 +63,8 @@
     "duration": 2,
     "stacking": "refresh",
     "max_stacks": 1,
-    "incoming_mult": 1.15
+    "incoming_mult": 1.15,
+    "break_taken_mult": 1.25
   },
   "haste": {
     "name": "Haste",
@@ -79,7 +82,8 @@
     "duration": 2,
     "stacking": "refresh",
     "max_stacks": 1,
-    "outgoing_mult": 1.15
+    "outgoing_mult": 1.15,
+    "break_gain_mult": 1.2
   },
   "weaken": {
     "name": "Weaken",
@@ -88,7 +92,8 @@
     "duration": 2,
     "stacking": "refresh",
     "max_stacks": 1,
-    "outgoing_mult": 0.85
+    "outgoing_mult": 0.85,
+    "break_gain_mult": 0.9
   },
   "slow": {
     "name": "Slow",
