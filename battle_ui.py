@@ -1748,7 +1748,7 @@ def make_default_player(name: str, element: str) -> Combatant:
         attack=15,
         defense=7,
         speed=11,
-        skills=["elemental", "burst", "crippling_slash", "focus", "rally", "heavy_charge", "sunder", "quick_step"],
+        skills=["elemental", "burst", "focus", "sunder", "rally", "crippling_slash"],
     )
 
 
@@ -1763,7 +1763,7 @@ def make_enemy_from_template(tpl: dict) -> Combatant:
 
     skills = tpl.get("skills")
     if not isinstance(skills, list) or not skills:
-        skills = ["elemental", "poison_sting", "crippling_slash", "sunder", "heavy_charge", "rally"]
+        skills = ["elemental", "burst", "crippling_slash", "sunder", "focus", "rally"]
 
     return Combatant(
         id="enemy",
