@@ -64,23 +64,7 @@
     "animation": "charge",
     "description": "Charge a heavy strike. Next turn automatically attacks with high power."
   },
-  {
-    "id": "poison_sting",
-    "name": "Poison Sting",
-    "icon": "☠",
-    "kind": "attack",
-    "element": "Wind",
-    "base_power": 0.9,
-    "accuracy": 0.95,
-    "break_bonus": 6,
-    "cost_sp": 8,
-    "cooldown": 1,
-    "time_mult": 0.95,
-    "target": "enemy",
-    "apply_status": [{"id": "poison", "duration": 3, "stacks": 1, "chance": 0.8}],
-    "animation": "sting",
-    "description": "Light hit with a high chance to apply Poison."
-  },
+
   {
     "id": "sunder",
     "name": "Sunder",
@@ -99,20 +83,7 @@
     "animation": "sunder",
     "description": "Armor-breaking hit. Builds Break, applies Exposed, and delays the target."
   },
-  {
-    "id": "quick_step",
-    "name": "Quick Step",
-    "icon": "💨",
-    "kind": "stance",
-    "element": "Neutral",
-    "cost_sp": 6,
-    "cooldown": 3,
-    "time_mult": 0.8,
-    "target": "self",
-    "apply_status": [{"id": "haste", "duration": 2, "stacks": 1, "chance": 1.0}],
-    "animation": "dash",
-    "description": "Gain Haste, acting more often on the timeline."
-  },
+
   {
     "id": "rally",
     "name": "Rally",
