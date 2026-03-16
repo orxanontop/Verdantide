@@ -51,21 +51,6 @@
     "description": "Recover a bit of HP and regain SP."
   },
   {
-    "id": "heavy_charge",
-    "name": "Heavy Charge",
-    "icon": "⚡",
-    "kind": "stance",
-    "element": "Neutral",
-    "cost_sp": 0,
-    "cooldown": 2,
-    "time_mult": 1.1,
-    "target": "self",
-    "apply_status": [{"id": "charge", "duration": 1, "stacks": 1, "chance": 1.0}],
-    "animation": "charge",
-    "description": "Charge a heavy strike. Next turn automatically attacks with high power."
-  },
-
-  {
     "id": "sunder",
     "name": "Sunder",
     "icon": "🪓",
