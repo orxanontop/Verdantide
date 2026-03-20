@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from battle_ui import BattleUI, make_default_player, make_enemy_from_template
+from game_modes import GameModeManager
 
 ADVANTAGE_FILE = Path("jsons/elemadvantages.json")
 ACTIONS_FILE = Path("jsons/actions.json")
@@ -253,5 +254,30 @@ def run_gui():
 
     root.mainloop()
 
+
+def run_openworld():
+    """Open world exploration mode with random battle encounters."""
+    
+    root = tk.Tk()
+    root.title("Manga RPG - Open World")
+    root.geometry("1000x700")
+    root.minsize(800, 600)
+    
+    style = ttk.Style(root)
+    try:
+        style.theme_use("clam")
+    except tk.TclError:
+        pass
+    
+    app_bg = "#0b0f17"
+    root.configure(bg=app_bg)
+    style.configure("App.TFrame", background=app_bg)
+    
+    game = GameModeManager(root)
+    game.pack(fill="both", expand=True)
+    
+    root.mainloop()
+
+
 if __name__ == "__main__":
-    run_gui()
+    run_openworld()
