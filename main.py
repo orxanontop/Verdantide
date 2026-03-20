@@ -279,5 +279,19 @@ def run_openworld():
     root.mainloop()
 
 
+def run_openworld_pygame():
+    """Open world with Pygame - supports real maps and sprites."""
+    from game_modes_pygame import run_game
+    run_game()
+
+
+def run_with_menu():
+    """Run game with main menu."""
+    from main_menu import run_menu
+    result = run_menu()
+    if result == "game":
+        run_openworld_pygame()
+
+
 if __name__ == "__main__":
-    run_openworld()
+    run_with_menu()
