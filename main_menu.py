@@ -1,760 +1,557 @@
 from __future__ import annotations
 
-"""
-main_menu.py
-
-Modern sleek main menu for the RPG game.
-"""
-
 import pygame
 
 pygame.init()
 
+SCREEN_WIDTH = 960
+SCREEN_HEIGHT = 640
 
-class Button:
-    def __init__(self, x: int, y: int, width: int, height: int, text: str):
-        self.rect = pygame.Rect(x, y, width, height)
+
+def draw_gradient_background(screen: pygame.Surface):
+    """Draw gradient from dusty pink/orange at top to deep purple at bottom."""
+    colors = [
+        (200, 130, 120),  # dusty pink
+        (180, 110, 100),
+        (140, 80, 90),
+        (100, 60, 80),
+        (70, 45, 70),
+        (50, 35, 60),
+        (40, 25, 55),
+        (35, 20, 50),
+    ]
+    
+    step_height = SCREEN_HEIGHT // (len(colors) - 1)
+    
+    for i in range(len(colors) - 1):
+        y1 = i * step_height
+        y2 = min((i + 1) * step_height, SCREEN_HEIGHT)
+        
+        for y in range(y1, y2):
+            t = (y - y1) / (y2 - y1)
+            r = int(colors[i][0] + (colors[i + 1][0] - colors[i][0]) * t)
+            g = int(colors[i][1] + (colors[i + 1][1] - colors[i][1]) * t)
+            b = int(colors[i][2] + (colors[i + 1][2] - colors[i][2]) * t)
+            pygame.draw.line(screen, (r, g, b), (0, y), (SCREEN_WIDTH, y))
+
+
+def draw_mountains(screen: pygame.Surface):
+    """Draw mountain silhouettes."""
+    # Mountain 1 (large, left)
+    pygame.draw.polygon(screen, (30, 15, 45), [
+        (0, SCREEN_HEIGHT),
+        (150, SCREEN_HEIGHT - 200),
+        (300, SCREEN_HEIGHT - 350),
+        (450, SCREEN_HEIGHT - 150),
+        (600, SCREEN_HEIGHT),
+    ])
+    
+    # Mountain 2 (medium, center-right)
+    pygame.draw.polygon(screen, (25, 12, 40), [
+        (400, SCREEN_HEIGHT),
+        (550, SCREEN_HEIGHT - 180),
+        (700, SCREEN_HEIGHT - 320),
+        (850, SCREEN_HEIGHT - 220),
+        (960, SCREEN_HEIGHT),
+    ])
+    
+    # Mountain 3 (small, far right)
+    pygame.draw.polygon(screen, (20, 10, 35), [
+        (800, SCREEN_HEIGHT),
+        (880, SCREEN_HEIGHT - 120),
+        (960, SCREEN_HEIGHT),
+    ])
+
+
+class TextButton:
+    """Simple text button with hover effects."""
+    
+    def __init__(self, x: int, y: int, text: str, font: pygame.font.Font):
         self.text = text
-        self.base_color = (30, 35, 45)
-        self.hover_color = (60, 80, 120)
-        self.pressed_color = (80, 100, 150)
-        self.current_color = self.base_color
+        self.base_font = font
+        self.x = x
+        self.y = y
         self.hovered = False
-        self.pressed = False
-        self.hover_scale = 1.0
-        self.font = pygame.font.Font(None, 36)
+        self.base_color = (255, 255, 255)
+        self.hover_color = (255, 215, 140)  # soft gold
     
     def update(self, mouse_pos: tuple[int, int]) -> None:
-        self.hovered = self.rect.collidepoint(mouse_pos)
+        width, height = self.base_font.size(self.text)
         
-        if self.pressed and self.hovered:
-            self.current_color = self.pressed_color
-            self.hover_scale = 0.95
-        elif self.hovered:
-            self.current_color = self.hover_color
-            self.hover_scale = min(1.05, self.hover_scale + 0.02)
-        else:
-            self.current_color = self.base_color
-            self.hover_scale = max(1.0, self.hover_scale - 0.02)
+        self.hovered = (
+            mouse_pos[0] >= self.x - width // 2 and
+            mouse_pos[0] <= self.x + width // 2 and
+            mouse_pos[1] >= self.y - height // 2 and
+            mouse_pos[1] <= self.y + height // 2
+        )
     
-    def draw(self, surface: pygame.Surface) -> None:
-        if self.hovered:
-            glow_rect = self.rect.inflate(int(self.rect.width * 0.05), int(self.rect.height * 0.1))
-            pygame.draw.rect(surface, (50, 80, 150), glow_rect, border_radius=12)
+    def draw(self, screen: pygame.Surface) -> None:
+        # Scale effect on hover
+        scale = 1.1 if self.hovered else 1.0
+        color = self.hover_color if self.hovered else self.base_color
         
-        pygame.draw.rect(surface, self.current_color, self.rect, border_radius=10)
+        # Scale font
+        scaled_size = int(32 * scale)
+        scaled_font = pygame.font.SysFont("times", scaled_size)
         
-        border_color = (100, 140, 220) if self.hovered else (60, 90, 160)
-        pygame.draw.rect(surface, border_color, self.rect, 2, border_radius=10)
+        # Draw shadow
+        shadow_surf = scaled_font.render(self.text, True, (20, 10, 30))
+        shadow_rect = shadow_surf.get_rect(center=(self.x + 2, self.y + 2))
+        screen.blit(shadow_surf, shadow_rect)
         
-        text_surf = self.font.render(self.text, True, (220, 225, 235))
-        text_rect = text_surf.get_rect(center=self.rect.center)
-        surface.blit(text_surf, text_rect)
+        # Draw text
+        text_surf = scaled_font.render(self.text, True, color)
+        text_rect = text_surf.get_rect(center=(self.x, self.y))
+        screen.blit(text_surf, text_rect)
     
-    def is_hovered(self) -> bool:
-        return self.hovered
+    def get_size(self) -> tuple[int, int]:
+        return self.base_font.size(self.text)
+    
+    def is_clicked(self, mouse_pos: tuple[int, int], clicked: bool) -> bool:
+        if not clicked:
+            return False
+        
+        width, height = self.get_size()
+        
+        return (
+            mouse_pos[0] >= self.x - width // 2 and
+            mouse_pos[0] <= self.x + width // 2 and
+            mouse_pos[1] >= self.y - height // 2 and
+            mouse_pos[1] <= self.y + height // 2
+        )
 
 
-class ToggleButton:
-    def __init__(self, x: int, y: int, width: int, height: int, label: str, initial_state: bool = True):
-        self.label = label
-        self.is_on = initial_state
-        self.rect = pygame.Rect(x, y, width, height)
-        self.switch_rect = pygame.Rect(x + width - 70, y + 8, 60, height - 16)
-        self.hovered = False
-        self.font = pygame.font.Font(None, 24)
-        self.small_font = pygame.font.Font(None, 20)
+class MenuState:
+    """Base class for menu states."""
     
-    def update(self, mouse_pos: tuple[int, int]) -> None:
-        self.hovered = self.rect.collidepoint(mouse_pos)
-    
-    def handle_click(self, mouse_pos: tuple[int, int]) -> bool:
-        if self.switch_rect.collidepoint(mouse_pos):
-            self.is_on = not self.is_on
-            return True
-        return False
-    
-    def draw(self, surface: pygame.Surface) -> None:
-        pygame.draw.rect(surface, (25, 30, 40), self.rect, border_radius=8)
-        
-        if self.hovered:
-            pygame.draw.rect(surface, (35, 45, 60), self.rect, border_radius=8)
-        
-        label_surf = self.small_font.render(self.label, True, (180, 185, 200))
-        surface.blit(label_surf, (self.rect.x + 15, self.rect.y + self.rect.height // 2 - 8))
-        
-        knob_x = self.switch_rect.x + 4 if self.is_on else self.switch_rect.x + self.switch_rect.width - 34
-        
-        pygame.draw.rect(surface, (40, 50, 80) if self.is_on else (80, 80, 100), 
-                       self.switch_rect, border_radius=10)
-        
-        pygame.draw.circle(surface, (220, 230, 255) if self.is_on else (150, 155, 170), 
-                         (knob_x + 15, self.switch_rect.centery), 13)
-        
-        if self.is_on:
-            on_surf = self.small_font.render("ON", True, (180, 230, 150))
-        else:
-            on_surf = self.small_font.render("OFF", True, (150, 150, 160))
-        on_rect = on_surf.get_rect(center=(self.switch_rect.centerx, self.switch_rect.centery))
-        surface.blit(on_surf, on_rect)
-
-
-class MainMenu:
-    def __init__(self, screen: pygame.Surface):
+    def __init__(self, screen: pygame.Surface, title_font: pygame.font.Font, button_font: pygame.font.Font):
         self.screen = screen
         self.screen_width = screen.get_width()
         self.screen_height = screen.get_height()
+        self.title_font = title_font
+        self.button_font = button_font
         self.buttons = []
-        self.running = True
+        self.back_button = None
+    
+    def handle_events(self, events: list) -> str | None:
+        """Handle events. Return new state name or None."""
+        return None
+    
+    def draw(self) -> None:
+        pass
+
+
+class MainMenuState(MenuState):
+    def __init__(self, screen, title_font, button_font):
+        super().__init__(screen, title_font, button_font)
         
-        center_x = self.screen_width // 2
-        button_width = 280
-        button_height = 55
-        start_y = 180
-        spacing = 70
+        # Buttons: Play, Tutorial, Achievements, Credits, Settings
+        menu_items = ["Play", "Tutorial", "Achievements", "Credits", "Settings"]
         
-        menu_items = ["Play", "Customize", "Tutorial", "Achievements", "Credits", "Settings"]
+        start_y = 220
+        spacing = 60
         
         for i, text in enumerate(menu_items):
             y = start_y + i * spacing
-            btn = Button(center_x - button_width // 2, y, button_width, button_height, text)
+            btn = TextButton(self.screen_width // 2, y, text, self.button_font)
             self.buttons.append(btn)
     
-    def handle_events(self) -> str | None:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self.running = False
-                return "quit"
-            
+    def handle_events(self, events: list) -> str | None:
+        for event in events:
             if event.type == pygame.MOUSEMOTION:
                 mouse_pos = event.pos
                 for btn in self.buttons:
                     btn.update(mouse_pos)
             
             if event.type == pygame.MOUSEBUTTONDOWN:
-                mouse_pos = pygame.mouse.get_pos()
-                for btn in self.buttons:
-                    if btn.rect.collidepoint(mouse_pos):
-                        btn.pressed = True
-            
-            if event.type == pygame.MOUSEBUTTONUP:
-                mouse_pos = pygame.mouse.get_pos()
-                for btn in self.buttons:
-                    if btn.rect.collidepoint(mouse_pos) and btn.pressed:
-                        btn.pressed = False
-                        return btn.text
-                    btn.pressed = False
-        
-        return None
-    
-    def draw(self) -> None:
-        self.screen.fill((12, 15, 25))
-        
-        for i in range(5):
-            alpha = 15 - i * 3
-            glow = pygame.Surface((self.screen_width, 150), pygame.SRCALPHA)
-            pygame.draw.rect(glow, (40, 80, 180, max(0, alpha)), 
-                          (0, 50 + i * 10, self.screen_width, 100 - i * 15), border_radius=20)
-            self.screen.blit(glow, (0, 0))
-        
-        title_font = pygame.font.Font(None, 80)
-        title = title_font.render("MANGA RPG", True, (100, 150, 255))
-        title_rect = title.get_rect(center=(self.screen_width // 2, 80))
-        shadow = title_font.render("MANGA RPG", True, (40, 50, 100))
-        shadow_rect = title_rect.copy()
-        shadow_rect.x += 4
-        shadow_rect.y += 4
-        self.screen.blit(shadow, shadow_rect)
-        self.screen.blit(title, title_rect)
-        
-        subtitle = pygame.font.Font(None, 28).render("Open World Adventure", True, (150, 160, 180))
-        subtitle_rect = subtitle.get_rect(center=(self.screen_width // 2, 130))
-        self.screen.blit(subtitle, subtitle_rect)
-        
-        for btn in self.buttons:
-            btn.draw(self.screen)
-        
-        version = pygame.font.Font(None, 20).render("v1.0.0", True, (80, 90, 110))
-        self.screen.blit(version, (15, self.screen_height - 30))
-
-
-class SubMenu:
-    def __init__(self, screen: pygame.Surface, title: str, on_back: str):
-        self.screen = screen
-        self.screen_width = screen.get_width()
-        self.screen_height = screen.get_height()
-        self.title = title
-        self.on_back = on_back
-        self.running = True
-        self.buttons = []
-        
-        self.back_btn = Button(20, self.screen_height - 60, 120, 45, "Back")
-        self.buttons.append(self.back_btn)
-    
-    def handle_events(self) -> str | None:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self.running = False
-                return "quit"
-            
-            if event.type == pygame.MOUSEMOTION:
                 mouse_pos = event.pos
                 for btn in self.buttons:
-                    btn.update(mouse_pos)
-            
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                mouse_pos = pygame.mouse.get_pos()
-                for btn in self.buttons:
-                    if btn.rect.collidepoint(mouse_pos):
-                        btn.pressed = True
-            
-            if event.type == pygame.MOUSEBUTTONUP:
-                mouse_pos = pygame.mouse.get_pos()
-                for btn in self.buttons:
-                    if btn.rect.collidepoint(mouse_pos) and btn.pressed:
-                        btn.pressed = False
-                        if btn.text == "Back":
-                            return self.on_back
+                    if btn.is_clicked(mouse_pos, True):
                         return btn.text
-                    btn.pressed = False
         
         return None
     
     def draw(self) -> None:
-        self.screen.fill((12, 15, 25))
+        draw_gradient_background(self.screen)
+        draw_mountains(self.screen)
         
-        header = pygame.Surface((self.screen_width, 90), pygame.SRCALPHA)
-        pygame.draw.rect(header, (20, 25, 40), header.get_rect(), border_radius=15)
-        pygame.draw.line(header, (60, 100, 180), (30, 88), (self.screen_width - 30, 88), 2)
-        self.screen.blit(header, (0, 0))
+        # Title
+        title = "Verdantide"
         
-        title_font = pygame.font.Font(None, 52)
-        title = title_font.render(self.title, True, (200, 210, 230))
-        title_rect = title.get_rect(center=(self.screen_width // 2, 50))
-        self.screen.blit(title, title_rect)
+        shadow_surf = self.title_font.render(title, True, (20, 10, 30))
+        shadow_rect = shadow_surf.get_rect(center=(self.screen_width // 2 + 3, 63))
+        self.screen.blit(shadow_surf, shadow_rect)
+        
+        title_surf = self.title_font.render(title, True, (255, 255, 255))
+        title_rect = title_surf.get_rect(center=(self.screen_width // 2, 60))
+        self.screen.blit(title_surf, title_rect)
         
         for btn in self.buttons:
             btn.draw(self.screen)
 
 
-class PlayMenu(SubMenu):
-    BIOMES = [
-        "forest", "prism_reef", "emberglow_caves", "drizzlewood",
-        "mirrorsteppe", "nimbus_tundra", "obsidian_bloom_badlands",
-        "riftglass_savannah", "sighing_mangrove", "aurora_drift", "hollowspire_jungle"
-    ]
-    
-    BIOME_NAMES = [
-        "Forest", "Prism Reef", "Emberglow Caves", "Drizzlewood",
-        "Mirrorsteppe", "Nimbus Tundra", "Obsidian Bloom Badlands",
-        "Riftglass Savannah", "Sighing Mangrove", "Aurora Drift", "Hollowspire Jungle"
-    ]
-    
-    def __init__(self, screen: pygame.Surface, on_back: str, on_start: str):
-        super().__init__(screen, "Play", on_back)
-        self.on_start = on_start
+class PlayMenuState(MenuState):
+    def __init__(self, screen, title_font, button_font):
+        super().__init__(screen, title_font, button_font)
+        
+        self.biomes = [
+            "forest", "prism_reef", "emberglow_caves", "drizzlewood",
+            "mirrorsteppe", "nimbus_tundra", "obsidian_bloom_badlands",
+            "riftglass_savannah", "sighing_mangrove", "aurora_drift", "hollowspire_jungle"
+        ]
+        
+        self.biome_names = [
+            "Forest", "Prism Reef", "Emberglow Caves", "Drizzlewood",
+            "Mirrorsteppe", "Nimbus Tundra", "Obsidian Bloom Badlands",
+            "Riftglass Savannah", "Sighing Mangrove", "Aurora Drift", "Hollowspire Jungle"
+        ]
+        
         self.selected_biome = 0
+        self.biomes_per_page = 5
         self.biome_page = 0
-        self.biomes_per_page = 4
         
-        center_x = self.screen_width // 2
+        # Navigation buttons
+        self.prev_btn = TextButton(self.screen_width // 2 - 80, 200, "<", self.button_font)
+        self.next_btn = TextButton(self.screen_width // 2 + 80, 200, ">", self.button_font)
         
-        self.new_game_btn = Button(center_x - 140, 130, 280, 50, "New Game")
-        self.buttons.extend([self.new_game_btn])
-        
-        self.nav_buttons = []
-        self.prev_btn = Button(center_x - 180, 200, 40, 40, "<")
-        self.next_btn = Button(center_x + 140, 200, 40, 40, ">")
-        self.nav_buttons.extend([self.prev_btn, self.next_btn])
-        
+        # Biome buttons
         self.biome_buttons = []
         for i in range(self.biomes_per_page):
-            y = 200 + i * 55
-            btn = Button(center_x - 120, y, 240, 45, "")
+            y = 260 + i * 55
+            btn = TextButton(self.screen_width // 2, y, "", self.button_font)
             self.biome_buttons.append(btn)
         
-        self.continue_btn = Button(center_x - 140, 450, 280, 50, "Continue")
-        self.buttons.append(self.continue_btn)
+        # Start game button
+        self.start_btn = TextButton(self.screen_width // 2, 530, "Start Game", self.button_font)
+        
+        # Back button
+        self.back_button = TextButton(60, self.screen_height - 45, "Back", self.button_font)
     
-    def handle_events(self) -> str | None:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self.running = False
-                return "quit"
-            
+    def handle_events(self, events: list) -> str | None:
+        mouse_pos = pygame.mouse.get_pos()
+        
+        for event in events:
             if event.type == pygame.MOUSEMOTION:
-                mouse_pos = event.pos
-                for btn in self.buttons:
-                    btn.update(mouse_pos)
-                for btn in self.nav_buttons:
+                for btn in [self.prev_btn, self.next_btn, self.back_button, self.start_btn]:
                     btn.update(mouse_pos)
                 for btn in self.biome_buttons:
                     btn.update(mouse_pos)
             
             if event.type == pygame.MOUSEBUTTONDOWN:
-                mouse_pos = event.pos
-                for btn in self.buttons:
-                    if btn.rect.collidepoint(mouse_pos):
-                        btn.pressed = True
-                for btn in self.nav_buttons:
-                    if btn.rect.collidepoint(mouse_pos):
-                        btn.pressed = True
-                for btn in self.biome_buttons:
-                    if btn.rect.collidepoint(mouse_pos):
-                        btn.pressed = True
-            
-            if event.type == pygame.MOUSEBUTTONUP:
-                mouse_pos = event.pos
+                # Check back button
+                if self.back_button.is_clicked(mouse_pos, True):
+                    return "back"
                 
-                for btn in self.nav_buttons:
-                    if btn.rect.collidepoint(mouse_pos) and btn.pressed:
-                        btn.pressed = False
-                        if btn.text == "<":
-                            self.biome_page = max(0, self.biome_page - 1)
-                        elif btn.text == ">":
-                            max_page = (len(self.BIOMES) - 1) // self.biomes_per_page
-                            self.biome_page = min(max_page, self.biome_page + 1)
+                # Check navigation
+                if self.prev_btn.is_clicked(mouse_pos, True):
+                    self.biome_page = max(0, self.biome_page - 1)
+                if self.next_btn.is_clicked(mouse_pos, True):
+                    max_page = (len(self.biomes) - 1) // self.biomes_per_page
+                    self.biome_page = min(max_page, self.biome_page + 1)
                 
+                # Check biome selection
                 for i, btn in enumerate(self.biome_buttons):
-                    if btn.rect.collidepoint(mouse_pos) and btn.pressed:
-                        btn.pressed = False
+                    if btn.is_clicked(mouse_pos, True):
                         idx = self.biome_page * self.biomes_per_page + i
-                        if idx < len(self.BIOMES):
+                        if idx < len(self.biomes):
                             self.selected_biome = idx
                 
-                for btn in self.buttons:
-                    if btn.rect.collidepoint(mouse_pos) and btn.pressed:
-                        btn.pressed = False
-                        if btn.text == "Back":
-                            return self.on_back
-                        elif btn.text in ["New Game", "Continue"]:
-                            biome_map = self.BIOMES[self.selected_biome]
-                            return (self.on_start, biome_map)
+                # Check start button
+                if self.start_btn.is_clicked(mouse_pos, True):
+                    return f"start:{self.biomes[self.selected_biome]}"
         
         return None
     
     def draw(self) -> None:
-        self.screen.fill((12, 15, 25))
+        draw_gradient_background(self.screen)
+        draw_mountains(self.screen)
         
-        header = pygame.Surface((self.screen_width, 90), pygame.SRCALPHA)
-        pygame.draw.rect(header, (20, 25, 40), header.get_rect(), border_radius=15)
-        pygame.draw.line(header, (60, 100, 180), (30, 88), (self.screen_width - 30, 88), 2)
-        self.screen.blit(header, (0, 0))
+        # Title
+        title_surf = self.title_font.render("Select Biome", True, (255, 255, 255))
+        title_rect = title_surf.get_rect(center=(self.screen_width // 2, 60))
+        self.screen.blit(title_surf, title_rect)
         
-        title_font = pygame.font.Font(None, 52)
-        title = title_font.render("Select Biome", True, (200, 210, 230))
-        title_rect = title.get_rect(center=(self.screen_width // 2, 50))
-        self.screen.blit(title, title_rect)
+        # Navigation arrows
+        self.prev_btn.draw(self.screen)
+        self.next_btn.draw(self.screen)
         
-        for btn in self.nav_buttons:
-            btn.draw(self.screen)
-        
+        # Biome buttons
         start_idx = self.biome_page * self.biomes_per_page
         for i in range(self.biomes_per_page):
             idx = start_idx + i
-            if idx < len(self.BIOMES):
+            if idx < len(self.biomes):
                 btn = self.biome_buttons[i]
-                name = self.BIOME_NAMES[idx]
+                name = self.biome_names[idx]
                 if idx == self.selected_biome:
-                    btn.text = f"✓ {name}"
+                    btn.text = f"> {name} <"
                 else:
                     btn.text = name
                 btn.draw(self.screen)
         
-        for btn in self.buttons:
-            if btn.text != "Back":
-                btn.draw(self.screen)
+        # Selected biome display
+        selected_name = self.biome_names[self.selected_biome]
+        info_font = pygame.font.SysFont("times", 20)
+        info_surf = info_font.render(f"Selected: {selected_name}", True, (180, 180, 200))
+        info_rect = info_surf.get_rect(center=(self.screen_width // 2, 510))
+        self.screen.blit(info_surf, info_rect)
         
-        selected_name = self.BIOME_NAMES[self.selected_biome]
-        info = pygame.font.Font(None, 22).render(f"Selected: {selected_name}", True, (150, 160, 180))
-        self.screen.blit(info, (self.screen_width // 2 - 80, 480))
+        # Start button
+        self.start_btn.draw(self.screen)
         
-        for btn in self.buttons:
-            if btn.text == "Back":
-                btn.draw(self.screen)
-    
-    def handle_events(self) -> str | None:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self.running = False
-                return "quit"
-            
-            if event.type == pygame.MOUSEMOTION:
-                mouse_pos = event.pos
-                for btn in self.buttons:
-                    btn.update(mouse_pos)
-                for btn in self.nav_buttons:
-                    btn.update(mouse_pos)
-                for btn in self.biome_buttons:
-                    btn.update(mouse_pos)
-            
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                mouse_pos = event.pos
-                for btn in self.buttons:
-                    if btn.rect.collidepoint(mouse_pos):
-                        btn.pressed = True
-                for btn in self.nav_buttons:
-                    if btn.rect.collidepoint(mouse_pos):
-                        btn.pressed = True
-                for btn in self.biome_buttons:
-                    if btn.rect.collidepoint(mouse_pos):
-                        btn.pressed = True
-            
-            if event.type == pygame.MOUSEBUTTONUP:
-                mouse_pos = event.pos
-                
-                for btn in self.nav_buttons:
-                    if btn.rect.collidepoint(mouse_pos) and btn.pressed:
-                        btn.pressed = False
-                        if btn.text == "<":
-                            self.biome_page = max(0, self.biome_page - 1)
-                        elif btn.text == ">":
-                            max_page = (len(self.BIOMES) - 1) // self.biomes_per_page
-                            self.biome_page = min(max_page, self.biome_page + 1)
-                
-                for i, btn in enumerate(self.biome_buttons):
-                    if btn.rect.collidepoint(mouse_pos) and btn.pressed:
-                        btn.pressed = False
-                        idx = self.biome_page * self.biomes_per_page + i
-                        if idx < len(self.BIOMES):
-                            self.selected_biome = idx
-                
-                for btn in self.buttons:
-                    if btn.rect.collidepoint(mouse_pos) and btn.pressed:
-                        btn.pressed = False
-                        if btn.text == "Back":
-                            return self.on_back
-                        elif btn.text in ["New Game", "Continue"]:
-                            biome_map = self.BIOMES[self.selected_biome]
-                            return (self.on_start, biome_map)
-        
-        return None
-    
-    def draw(self) -> None:
-        super().draw()
-        
-        hint = pygame.font.Font(None, 24).render("Start a new adventure or continue where you left off.", True, (130, 140, 160))
-        hint_rect = hint.get_rect(center=(self.screen_width // 2, 340))
-        self.screen.blit(hint, hint_rect)
+        # Back button
+        self.back_button.draw(self.screen)
 
 
-class CustomizeMenu(SubMenu):
-    def __init__(self, screen: pygame.Surface, on_back: str):
-        super().__init__(screen, "Customize", on_back)
-    
-    def draw(self) -> None:
-        super().draw()
-        
-        center = (self.screen_width // 2, self.screen_height // 2)
-        
-        placeholder = pygame.font.Font(None, 36).render("Character Customization", True, (150, 160, 180))
-        placeholder_rect = placeholder.get_rect(center=(center[0], center[1] - 30))
-        self.screen.blit(placeholder, placeholder_rect)
-        
-        coming = pygame.font.Font(None, 28).render("(Coming Soon)", True, (100, 110, 130))
-        coming_rect = coming.get_rect(center=(center[0], center[1] + 20))
-        self.screen.blit(coming, coming_rect)
-
-
-class TutorialMenu(SubMenu):
-    def __init__(self, screen: pygame.Surface, on_back: str):
-        super().__init__(screen, "Tutorial", on_back)
+class TutorialMenuState(MenuState):
+    def __init__(self, screen, title_font, button_font):
+        super().__init__(screen, title_font, button_font)
         
         self.tutorials = [
-            ("Movement", "WASD or Arrow Keys to move around"),
+            ("Movement", "Use WASD or Arrow Keys to move around"),
             ("Combat", "Random encounters trigger turn-based battles"),
             ("Skills", "Each skill costs SP and has cooldowns"),
             ("Elements", "Fire > Ice > Wind > Fire"),
             ("Break", "Fill the break gauge to stun enemies!"),
         ]
+        
+        self.back_button = TextButton(60, self.screen_height - 45, "Back", self.button_font)
     
-    def draw(self) -> None:
-        super().draw()
+    def handle_events(self, events: list) -> str | None:
+        mouse_pos = pygame.mouse.get_pos()
         
-        y = 140
-        for title, desc in self.tutorials:
-            t_surf = pygame.font.Font(None, 30).render(title, True, (100, 150, 255))
-            self.screen.blit(t_surf, (100, y))
-            
-            d_surf = pygame.font.Font(None, 24).render(desc, True, (160, 170, 190))
-            self.screen.blit(d_surf, (100, y + 32))
-            y += 80
-
-
-class AchievementsMenu(SubMenu):
-    def __init__(self, screen: pygame.Surface, on_back: str):
-        super().__init__(screen, "Achievements", on_back)
-    
-    def draw(self) -> None:
-        super().draw()
-        
-        center = (self.screen_width // 2, self.screen_height // 2)
-        
-        placeholder = pygame.font.Font(None, 36).render("Achievements System", True, (150, 160, 180))
-        placeholder_rect = placeholder.get_rect(center=(center[0], center[1] - 30))
-        self.screen.blit(placeholder, placeholder_rect)
-        
-        coming = pygame.font.Font(None, 28).render("(Coming Soon)", True, (100, 110, 130))
-        coming_rect = coming.get_rect(center=(center[0], center[1] + 20))
-        self.screen.blit(coming, coming_rect)
-
-
-class CreditsMenu(SubMenu):
-    def __init__(self, screen: pygame.Surface, on_back: str):
-        super().__init__(screen, "Credits", on_back)
-        
-        self.credits = [
-            ("MANGA RPG", 52, (100, 150, 255)),
-            ("An Open World Adventure", 28, (180, 190, 210)),
-            ("", 20, (0, 0, 0)),
-            ("Created with Python & Pygame", 26, (150, 160, 180)),
-            ("", 20, (0, 0, 0)),
-            ("", 34, (200, 180, 100)),
-            ("Orxan Majidli", 24, (150, 160, 180)),
-            ("Tiled Map Editor", 24, (150, 160, 180)),
-            ("", 20, (0, 0, 0)),
-            ("2026", 26, (100, 110, 130)),
-        ]
-    
-    def draw(self) -> None:
-        super().draw()
-        
-        y = 140
-        for text, size, color in self.credits:
-            if text:
-                surf = pygame.font.Font(None, size).render(text, True, color)
-                rect = surf.get_rect(center=(self.screen_width // 2, y))
-                self.screen.blit(surf, rect)
-            y += size + 12
-
-
-class SettingsMenu(SubMenu):
-    def __init__(self, screen: pygame.Surface, on_back: str):
-        super().__init__(screen, "Settings", on_back)
-        
-        self.settings = {
-            "Music Volume": True,
-            "SFX Volume": True,
-            "Fullscreen": False,
-            "VSync": True,
-            "Auto-Save": True,
-            "Show FPS": False,
-        }
-        
-        self.toggle_buttons: list[ToggleButton] = []
-        self.buttons = []
-        
-        self.back_btn = Button(20, 20, 120, 45, "Back")
-        self.buttons.append(self.back_btn)
-        
-        self._create_toggles()
-    
-    def _create_toggles(self) -> None:
-        self.toggle_buttons = []
-        
-        categories = [
-            ("Sound", ["Music Volume", "SFX Volume"]),
-            ("Graphics", ["Fullscreen", "VSync"]),
-            ("Gameplay", ["Auto-Save", "Show FPS"]),
-        ]
-        
-        y = 140
-        for category, items in categories:
-            for item in items:
-                toggle = ToggleButton(100, y, 350, 45, item, self.settings.get(item, True))
-                self.toggle_buttons.append(toggle)
-                y += 55
-            y += 10
-    
-    def handle_events(self) -> str | None:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self.running = False
-                return "quit"
-            
+        for event in events:
             if event.type == pygame.MOUSEMOTION:
-                mouse_pos = event.pos
-                for btn in self.buttons:
-                    btn.update(mouse_pos)
-                for toggle in self.toggle_buttons:
-                    toggle.update(mouse_pos)
+                self.back_button.update(mouse_pos)
             
             if event.type == pygame.MOUSEBUTTONDOWN:
-                mouse_pos = event.pos
-                for btn in self.buttons:
-                    if btn.rect.collidepoint(mouse_pos):
-                        btn.pressed = True
-            
-            if event.type == pygame.MOUSEBUTTONUP:
-                mouse_pos = event.pos
-                for btn in self.buttons:
-                    if btn.rect.collidepoint(mouse_pos) and btn.pressed:
-                        btn.pressed = False
-                        if btn.text == "Back":
-                            return self.on_back
-                    btn.pressed = False
-                
-                for toggle in self.toggle_buttons:
-                    if toggle.handle_click(mouse_pos):
-                        self.settings[toggle.label] = toggle.is_on
+                if self.back_button.is_clicked(mouse_pos, True):
+                    return "back"
         
         return None
     
     def draw(self) -> None:
-        self.screen.fill((12, 15, 25))
+        draw_gradient_background(self.screen)
         
-        header = pygame.Surface((self.screen_width, 90), pygame.SRCALPHA)
-        pygame.draw.rect(header, (20, 25, 40), header.get_rect(), border_radius=15)
-        pygame.draw.line(header, (60, 100, 180), (30, 88), (self.screen_width - 30, 88), 2)
-        self.screen.blit(header, (0, 0))
+        # Title
+        title_surf = self.title_font.render("Tutorial", True, (255, 255, 255))
+        title_rect = title_surf.get_rect(center=(self.screen_width // 2, 60))
+        self.screen.blit(title_surf, title_rect)
         
-        title_font = pygame.font.Font(None, 52)
-        title = title_font.render("Settings", True, (200, 210, 230))
-        title_rect = title.get_rect(center=(self.screen_width // 2, 50))
-        self.screen.blit(title, title_rect)
+        # Tutorial content
+        y = 150
+        for title, desc in self.tutorials:
+            t_surf = self.button_font.render(title, True, (100, 150, 255))
+            self.screen.blit(t_surf, (100, y))
+            
+            d_surf = pygame.font.SysFont("times", 20).render(desc, True, (180, 180, 200))
+            self.screen.blit(d_surf, (120, y + 30))
+            
+            y += 70
         
-        y = 140
-        categories = [
-            ("Sound", ["Music Volume", "SFX Volume"]),
-            ("Graphics", ["Fullscreen", "VSync"]),
-            ("Gameplay", ["Auto-Save", "Show FPS"]),
+        self.back_button.draw(self.screen)
+
+
+class AchievementsMenuState(MenuState):
+    def __init__(self, screen, title_font, button_font):
+        super().__init__(screen, title_font, button_font)
+        self.back_button = TextButton(60, self.screen_height - 45, "Back", self.button_font)
+    
+    def handle_events(self, events: list) -> str | None:
+        mouse_pos = pygame.mouse.get_pos()
+        
+        for event in events:
+            if event.type == pygame.MOUSEMOTION:
+                self.back_button.update(mouse_pos)
+            
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if self.back_button.is_clicked(mouse_pos, True):
+                    return "back"
+        
+        return None
+    
+    def draw(self) -> None:
+        draw_gradient_background(self.screen)
+        
+        title_surf = self.title_font.render("Achievements", True, (255, 255, 255))
+        title_rect = title_surf.get_rect(center=(self.screen_width // 2, 60))
+        self.screen.blit(title_surf, title_rect)
+        
+        placeholder = pygame.font.SysFont("times", 24).render("No achievements yet!", True, (180, 180, 200))
+        placeholder_rect = placeholder.get_rect(center=(self.screen_width // 2, 300))
+        self.screen.blit(placeholder, placeholder_rect)
+        
+        self.back_button.draw(self.screen)
+
+
+class CreditsMenuState(MenuState):
+    def __init__(self, screen, title_font, button_font):
+        super().__init__(screen, title_font, button_font)
+        self.back_button = TextButton(60, self.screen_height - 45, "Back", self.button_font)
+    
+    def handle_events(self, events: list) -> str | None:
+        mouse_pos = pygame.mouse.get_pos()
+        
+        for event in events:
+            if event.type == pygame.MOUSEMOTION:
+                self.back_button.update(mouse_pos)
+            
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if self.back_button.is_clicked(mouse_pos, True):
+                    return "back"
+        
+        return None
+    
+    def draw(self) -> None:
+        draw_gradient_background(self.screen)
+        
+        title_surf = self.title_font.render("Credits", True, (255, 255, 255))
+        title_rect = title_surf.get_rect(center=(self.screen_width // 2, 60))
+        self.screen.blit(title_surf, title_rect)
+        
+        credits = [
+            "Verdantide",
+            "",
+            "A turn-based RPG",
+            "",
+            "Built with Python, Pygame & Tkinter",
         ]
         
-        for category, items in categories:
-            cat_surf = pygame.font.Font(None, 32).render(category, True, (100, 150, 255))
-            self.screen.blit(cat_surf, (100, y))
+        y = 200
+        for line in credits:
+            if line:
+                surf = pygame.font.SysFont("times", 28).render(line, True, (200, 200, 220))
+            else:
+                surf = pygame.font.SysFont("times", 20).render(" ", True, (180, 180, 200))
+            rect = surf.get_rect(center=(self.screen_width // 2, y))
+            self.screen.blit(surf, rect)
             y += 40
-            
-            for item in items:
-                for toggle in self.toggle_buttons:
-                    if toggle.label == item:
-                        toggle.rect.y = y
-                        toggle.switch_rect.y = y + 8
-                        toggle.draw(self.screen)
-                        break
-                y += 55
-            y += 15
         
-        for btn in self.buttons:
-            btn.draw(self.screen)
+        self.back_button.draw(self.screen)
+
+
+class SettingsMenuState(MenuState):
+    def __init__(self, screen, title_font, button_font):
+        super().__init__(screen, title_font, button_font)
+        
+        self.settings = [
+            ("Music", True),
+            ("Sound Effects", True),
+            ("Fullscreen", False),
+        ]
+        
+        self.toggles = {}  # Will hold toggle states
+        
+        self.back_button = TextButton(60, self.screen_height - 45, "Back", self.button_font)
+    
+    def handle_events(self, events: list) -> str | None:
+        mouse_pos = pygame.mouse.get_pos()
+        
+        for event in events:
+            if event.type == pygame.MOUSEMOTION:
+                self.back_button.update(mouse_pos)
+            
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if self.back_button.is_clicked(mouse_pos, True):
+                    return "back"
+        
+        return None
+    
+    def draw(self) -> None:
+        draw_gradient_background(self.screen)
+        
+        title_surf = self.title_font.render("Settings", True, (255, 255, 255))
+        title_rect = title_surf.get_rect(center=(self.screen_width // 2, 60))
+        self.screen.blit(title_surf, title_rect)
+        
+        # Placeholder settings
+        y = 200
+        for label, default in self.settings:
+            label_surf = pygame.font.SysFont("times", 24).render(label, True, (200, 200, 220))
+            self.screen.blit(label_surf, (self.screen_width // 2 - 150, y))
+            y += 50
+        
+        self.back_button.draw(self.screen)
+
+
+class MenuManager:
+    def __init__(self, screen: pygame.Surface):
+        self.screen = screen
+        self.screen_width = screen.get_width()
+        self.screen_height = screen.get_height()
+        
+        self.title_font = pygame.font.SysFont("times", 72)
+        self.button_font = pygame.font.SysFont("times", 32)
+        
+        self.states = {}
+        self.current_state = "main"
+        
+        # Initialize all states
+        self.states["main"] = MainMenuState(screen, self.title_font, self.button_font)
+        self.states["play"] = PlayMenuState(screen, self.title_font, self.button_font)
+        self.states["tutorial"] = TutorialMenuState(screen, self.title_font, self.button_font)
+        self.states["achievements"] = AchievementsMenuState(screen, self.title_font, self.button_font)
+        self.states["credits"] = CreditsMenuState(screen, self.title_font, self.button_font)
+        self.states["settings"] = SettingsMenuState(screen, self.title_font, self.button_font)
+    
+    def handle_events(self) -> str | None:
+        events = pygame.event.get()
+        
+        for event in events:
+            if event.type == pygame.QUIT:
+                return "quit"
+        
+        state = self.states[self.current_state]
+        result = state.handle_events(events)
+        
+        if result == "back":
+            self.current_state = "main"
+        elif result == "Play":
+            self.current_state = "play"
+        elif result == "Tutorial":
+            self.current_state = "tutorial"
+        elif result == "Achievements":
+            self.current_state = "achievements"
+        elif result == "Credits":
+            self.current_state = "credits"
+        elif result == "Settings":
+            self.current_state = "settings"
+        elif result and result.startswith("start:"):
+            return result  # Return the biome to start the game
+        
+        return None
+    
+    def draw(self) -> None:
+        state = self.states[self.current_state]
+        state.draw()
 
 
 def run_menu() -> str | None:
     pygame.init()
-    screen = pygame.display.set_mode((960, 640))
-    pygame.display.set_caption("Manga RPG - Main Menu")
+    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+    pygame.display.set_caption("Verdantide")
     
     clock = pygame.time.Clock()
     
-    current_menu = "main"
-    menu_stack = []
-    
-    main_menu = MainMenu(screen)
-    play_menu = None
-    customize_menu = None
-    tutorial_menu = None
-    achievements_menu = None
-    credits_menu = None
-    settings_menu = None
-    
+    menu = MenuManager(screen)
     running = True
-    game_result = None
     
     while running:
-        result = None
+        result = menu.handle_events()
+        menu.draw()
         
-        if current_menu == "main":
-            result = main_menu.handle_events()
-            main_menu.draw()
-            
-            if result == "Play":
-                play_menu = PlayMenu(screen, "main", "game")
-                current_menu = "play"
-            elif result == "Customize":
-                customize_menu = CustomizeMenu(screen, "main")
-                current_menu = "customize"
-            elif result == "Tutorial":
-                tutorial_menu = TutorialMenu(screen, "main")
-                current_menu = "tutorial"
-            elif result == "Achievements":
-                achievements_menu = AchievementsMenu(screen, "main")
-                current_menu = "achievements"
-            elif result == "Credits":
-                credits_menu = CreditsMenu(screen, "main")
-                current_menu = "credits"
-            elif result == "Settings":
-                settings_menu = SettingsMenu(screen, "main")
-                current_menu = "settings"
-            elif result == "quit":
-                running = False
-        
-        elif current_menu == "play":
-            result = play_menu.handle_events()
-            play_menu.draw()
-            
-            if result == "main":
-                play_menu = None
-                current_menu = "main"
-            elif isinstance(result, tuple) and result[0] == "game":
-                selected_biome = result[1] if len(result) > 1 else "forest"
-                game_biome = selected_biome
-                running = False
-                game_result = "game:" + game_biome
-        
-        elif current_menu == "customize":
-            result = customize_menu.handle_events()
-            customize_menu.draw()
-            
-            if result == "main":
-                customize_menu = None
-                current_menu = "main"
-        
-        elif current_menu == "tutorial":
-            result = tutorial_menu.handle_events()
-            tutorial_menu.draw()
-            
-            if result == "main":
-                tutorial_menu = None
-                current_menu = "main"
-        
-        elif current_menu == "achievements":
-            result = achievements_menu.handle_events()
-            achievements_menu.draw()
-            
-            if result == "main":
-                achievements_menu = None
-                current_menu = "main"
-        
-        elif current_menu == "credits":
-            result = credits_menu.handle_events()
-            credits_menu.draw()
-            
-            if result == "main":
-                credits_menu = None
-                current_menu = "main"
-        
-        elif current_menu == "settings":
-            result = settings_menu.handle_events()
-            settings_menu.draw()
-            
-            if result == "main":
-                settings_menu = None
-                current_menu = "main"
+        if result == "quit":
+            running = False
+        elif result and result.startswith("start:"):
+            biome = result.split(":")[1]
+            pygame.quit()
+            return f"game:{biome}"
         
         pygame.display.flip()
         clock.tick(60)
     
     pygame.quit()
-    
-    if game_result:
-        return game_result
     return None
 
 
 if __name__ == "__main__":
-    result = run_menu()
-    if result and result.startswith("game:"):
-        biome = result.split(":")[1]
-        print(f"Starting game with biome: {biome}")
-        from game_modes_pygame import run_game
-        run_game(f"maps/{biome}.lua", biome)
+    run_menu()

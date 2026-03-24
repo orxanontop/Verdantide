@@ -90,7 +90,9 @@ BIOME_PRESETS: dict[str, BiomeData] = {
 
 
 def get_biome_data(biome_name: str) -> BiomeData:
-    return BIOME_PRESETS.get(biome_name, BIOME_PRESETS["Forest"])
+    # Convert "forest" -> "Forest", "prism_reef" -> "Prism Reef"
+    formatted = biome_name.replace("_", " ").title()
+    return BIOME_PRESETS.get(formatted, BIOME_PRESETS["Forest"])
 
 
 @dataclass
