@@ -279,18 +279,20 @@ def run_openworld():
     root.mainloop()
 
 
-def run_openworld_pygame():
+def run_openworld_pygame(map_file: str = "justamap3.lua", biome_name: str = "Forest"):
     """Open world with Pygame - supports real maps and sprites."""
     from game_modes_pygame import run_game
-    run_game()
+    run_game(map_file, biome_name)
 
 
 def run_with_menu():
     """Run game with main menu."""
     from main_menu import run_menu
     result = run_menu()
-    if result == "game":
-        run_openworld_pygame()
+    if result and result.startswith("game:"):
+        biome = result.split(":")[1]
+        map_file = f"maps/{biome}.lua"
+        run_openworld_pygame(map_file, biome)
 
 
 if __name__ == "__main__":

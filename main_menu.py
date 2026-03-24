@@ -238,14 +238,43 @@ class SubMenu:
 
 
 class PlayMenu(SubMenu):
+    BIOMES = [
+        "forest", "prism_reef", "emberglow_caves", "drizzlewood",
+        "mirrorsteppe", "nimbus_tundra", "obsidian_bloom_badlands",
+        "riftglass_savannah", "sighing_mangrove", "aurora_drift", "hollowspire_jungle"
+    ]
+    
+    BIOME_NAMES = [
+        "Forest", "Prism Reef", "Emberglow Caves", "Drizzlewood",
+        "Mirrorsteppe", "Nimbus Tundra", "Obsidian Bloom Badlands",
+        "Riftglass Savannah", "Sighing Mangrove", "Aurora Drift", "Hollowspire Jungle"
+    ]
+    
     def __init__(self, screen: pygame.Surface, on_back: str, on_start: str):
         super().__init__(screen, "Play", on_back)
         self.on_start = on_start
+        self.selected_biome = 0
+        self.biome_page = 0
+        self.biomes_per_page = 4
         
         center_x = self.screen_width // 2
-        self.new_game_btn = Button(center_x - 140, 160, 280, 60, "New Game")
-        self.continue_btn = Button(center_x - 140, 240, 280, 60, "Continue")
-        self.buttons.extend([self.new_game_btn, self.continue_btn])
+        
+        self.new_game_btn = Button(center_x - 140, 130, 280, 50, "New Game")
+        self.buttons.extend([self.new_game_btn])
+        
+        self.nav_buttons = []
+        self.prev_btn = Button(center_x - 180, 200, 40, 40, "<")
+        self.next_btn = Button(center_x + 140, 200, 40, 40, ">")
+        self.nav_buttons.extend([self.prev_btn, self.next_btn])
+        
+        self.biome_buttons = []
+        for i in range(self.biomes_per_page):
+            y = 200 + i * 55
+            btn = Button(center_x - 120, y, 240, 45, "")
+            self.biome_buttons.append(btn)
+        
+        self.continue_btn = Button(center_x - 140, 450, 280, 50, "Continue")
+        self.buttons.append(self.continue_btn)
     
     def handle_events(self) -> str | None:
         for event in pygame.event.get():
@@ -257,23 +286,147 @@ class PlayMenu(SubMenu):
                 mouse_pos = event.pos
                 for btn in self.buttons:
                     btn.update(mouse_pos)
+                for btn in self.nav_buttons:
+                    btn.update(mouse_pos)
+                for btn in self.biome_buttons:
+                    btn.update(mouse_pos)
             
             if event.type == pygame.MOUSEBUTTONDOWN:
-                mouse_pos = pygame.mouse.get_pos()
+                mouse_pos = event.pos
                 for btn in self.buttons:
+                    if btn.rect.collidepoint(mouse_pos):
+                        btn.pressed = True
+                for btn in self.nav_buttons:
+                    if btn.rect.collidepoint(mouse_pos):
+                        btn.pressed = True
+                for btn in self.biome_buttons:
                     if btn.rect.collidepoint(mouse_pos):
                         btn.pressed = True
             
             if event.type == pygame.MOUSEBUTTONUP:
-                mouse_pos = pygame.mouse.get_pos()
+                mouse_pos = event.pos
+                
+                for btn in self.nav_buttons:
+                    if btn.rect.collidepoint(mouse_pos) and btn.pressed:
+                        btn.pressed = False
+                        if btn.text == "<":
+                            self.biome_page = max(0, self.biome_page - 1)
+                        elif btn.text == ">":
+                            max_page = (len(self.BIOMES) - 1) // self.biomes_per_page
+                            self.biome_page = min(max_page, self.biome_page + 1)
+                
+                for i, btn in enumerate(self.biome_buttons):
+                    if btn.rect.collidepoint(mouse_pos) and btn.pressed:
+                        btn.pressed = False
+                        idx = self.biome_page * self.biomes_per_page + i
+                        if idx < len(self.BIOMES):
+                            self.selected_biome = idx
+                
                 for btn in self.buttons:
                     if btn.rect.collidepoint(mouse_pos) and btn.pressed:
                         btn.pressed = False
                         if btn.text == "Back":
                             return self.on_back
                         elif btn.text in ["New Game", "Continue"]:
-                            return self.on_start
-                    btn.pressed = False
+                            biome_map = self.BIOMES[self.selected_biome]
+                            return (self.on_start, biome_map)
+        
+        return None
+    
+    def draw(self) -> None:
+        self.screen.fill((12, 15, 25))
+        
+        header = pygame.Surface((self.screen_width, 90), pygame.SRCALPHA)
+        pygame.draw.rect(header, (20, 25, 40), header.get_rect(), border_radius=15)
+        pygame.draw.line(header, (60, 100, 180), (30, 88), (self.screen_width - 30, 88), 2)
+        self.screen.blit(header, (0, 0))
+        
+        title_font = pygame.font.Font(None, 52)
+        title = title_font.render("Select Biome", True, (200, 210, 230))
+        title_rect = title.get_rect(center=(self.screen_width // 2, 50))
+        self.screen.blit(title, title_rect)
+        
+        for btn in self.nav_buttons:
+            btn.draw(self.screen)
+        
+        start_idx = self.biome_page * self.biomes_per_page
+        for i in range(self.biomes_per_page):
+            idx = start_idx + i
+            if idx < len(self.BIOMES):
+                btn = self.biome_buttons[i]
+                name = self.BIOME_NAMES[idx]
+                if idx == self.selected_biome:
+                    btn.text = f"✓ {name}"
+                else:
+                    btn.text = name
+                btn.draw(self.screen)
+        
+        for btn in self.buttons:
+            if btn.text != "Back":
+                btn.draw(self.screen)
+        
+        selected_name = self.BIOME_NAMES[self.selected_biome]
+        info = pygame.font.Font(None, 22).render(f"Selected: {selected_name}", True, (150, 160, 180))
+        self.screen.blit(info, (self.screen_width // 2 - 80, 480))
+        
+        for btn in self.buttons:
+            if btn.text == "Back":
+                btn.draw(self.screen)
+    
+    def handle_events(self) -> str | None:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.running = False
+                return "quit"
+            
+            if event.type == pygame.MOUSEMOTION:
+                mouse_pos = event.pos
+                for btn in self.buttons:
+                    btn.update(mouse_pos)
+                for btn in self.nav_buttons:
+                    btn.update(mouse_pos)
+                for btn in self.biome_buttons:
+                    btn.update(mouse_pos)
+            
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = event.pos
+                for btn in self.buttons:
+                    if btn.rect.collidepoint(mouse_pos):
+                        btn.pressed = True
+                for btn in self.nav_buttons:
+                    if btn.rect.collidepoint(mouse_pos):
+                        btn.pressed = True
+                for btn in self.biome_buttons:
+                    if btn.rect.collidepoint(mouse_pos):
+                        btn.pressed = True
+            
+            if event.type == pygame.MOUSEBUTTONUP:
+                mouse_pos = event.pos
+                
+                for btn in self.nav_buttons:
+                    if btn.rect.collidepoint(mouse_pos) and btn.pressed:
+                        btn.pressed = False
+                        if btn.text == "<":
+                            self.biome_page = max(0, self.biome_page - 1)
+                        elif btn.text == ">":
+                            max_page = (len(self.BIOMES) - 1) // self.biomes_per_page
+                            self.biome_page = min(max_page, self.biome_page + 1)
+                
+                for i, btn in enumerate(self.biome_buttons):
+                    if btn.rect.collidepoint(mouse_pos) and btn.pressed:
+                        btn.pressed = False
+                        idx = self.biome_page * self.biomes_per_page + i
+                        if idx < len(self.BIOMES):
+                            self.selected_biome = idx
+                
+                for btn in self.buttons:
+                    if btn.rect.collidepoint(mouse_pos) and btn.pressed:
+                        btn.pressed = False
+                        if btn.text == "Back":
+                            return self.on_back
+                        elif btn.text in ["New Game", "Continue"]:
+                            biome_map = self.BIOMES[self.selected_biome]
+                            return (self.on_start, biome_map)
         
         return None
     
@@ -356,11 +509,11 @@ class CreditsMenu(SubMenu):
             ("", 20, (0, 0, 0)),
             ("Created with Python & Pygame", 26, (150, 160, 180)),
             ("", 20, (0, 0, 0)),
-            ("Special Thanks", 34, (200, 180, 100)),
-            ("OpenCode AI Assistant", 24, (150, 160, 180)),
+            ("", 34, (200, 180, 100)),
+            ("Orxan Majidli", 24, (150, 160, 180)),
             ("Tiled Map Editor", 24, (150, 160, 180)),
             ("", 20, (0, 0, 0)),
-            ("2024-2026", 26, (100, 110, 130)),
+            ("2026", 26, (100, 110, 130)),
         ]
     
     def draw(self) -> None:
@@ -505,6 +658,7 @@ def run_menu() -> str | None:
     settings_menu = None
     
     running = True
+    game_result = None
     
     while running:
         result = None
@@ -541,8 +695,11 @@ def run_menu() -> str | None:
             if result == "main":
                 play_menu = None
                 current_menu = "main"
-            elif result == "game":
+            elif isinstance(result, tuple) and result[0] == "game":
+                selected_biome = result[1] if len(result) > 1 else "forest"
+                game_biome = selected_biome
                 running = False
+                game_result = "game:" + game_biome
         
         elif current_menu == "customize":
             result = customize_menu.handle_events()
@@ -589,14 +746,15 @@ def run_menu() -> str | None:
     
     pygame.quit()
     
-    if result == "game" or (current_menu == "play" and not running):
-        return "game"
+    if game_result:
+        return game_result
     return None
 
 
 if __name__ == "__main__":
     result = run_menu()
-    if result == "game":
-        print("Starting game...")
+    if result and result.startswith("game:"):
+        biome = result.split(":")[1]
+        print(f"Starting game with biome: {biome}")
         from game_modes_pygame import run_game
-        run_game()
+        run_game(f"maps/{biome}.lua", biome)
