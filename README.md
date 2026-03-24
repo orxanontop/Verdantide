@@ -1,6 +1,6 @@
 # Verdantide
 
-A turn-based open-world RPG built with Python, Pygame, and Tkinter.
+A turn-based open-world RPG built with Python, Pygame,Lua and Tkinter.
 
 ## Features
 
