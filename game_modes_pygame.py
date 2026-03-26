@@ -116,7 +116,9 @@ class OpenWorldBattleGame:
     def _on_encounter(self, x: float, y: float) -> None:
         """Handle random encounter trigger."""
         self.state.world_position = (x, y)
-        self._start_battle()
+        self.current_mode = "battle"
+        if self._openworld:
+            self._openworld.stop()
     
     def _on_interact(self, obj) -> None:
         """Handle player interaction with objects."""
@@ -209,8 +211,19 @@ class OpenWorldBattleGame:
     
     def start(self) -> None:
         """Start the game loop."""
-        if self._openworld:
+        while self.running:
+            if not self._openworld:
+                self._initialize_openworld(960, 640, self.state.current_map, self.state.current_biome)
+
+            self.current_mode = "openworld"
             self._openworld.start()
+
+            if self.current_mode == "battle":
+                self._start_battle()
+                continue
+
+            # Openworld exited without a battle trigger (user quit).
+            self.running = False
 
 
 def run_game(
