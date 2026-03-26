@@ -89,10 +89,71 @@ BIOME_PRESETS: dict[str, BiomeData] = {
 }
 
 
+def _hex_to_rgb(value: str, fallback: tuple[int, int, int] = (80, 80, 80)) -> tuple[int, int, int]:
+    value = (value or "").lstrip("#")
+    if len(value) != 6:
+        return fallback
+    try:
+        return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
+    except Exception:
+        return fallback
+
+
+def _tint(rgb: tuple[int, int, int], delta: int) -> tuple[int, int, int]:
+    return tuple(max(0, min(255, c + delta)) for c in rgb)
+
+
+def _biome_from_map_generator(name: str) -> BiomeData | None:
+    try:
+        from map_generator import BIOMES as MAP_BIOMES
+    except Exception:
+        return None
+
+    target = (name or "").strip().lower()
+    if not target:
+        return None
+
+    for biome in MAP_BIOMES:
+        biome_name = str(biome.get("name", "")).strip()
+        if not biome_name or biome_name.lower() != target:
+            continue
+
+        colors = biome.get("colors", {}) or {}
+        ground = _hex_to_rgb(colors.get("ground", ""))
+        wall = _hex_to_rgb(colors.get("wall", ""))
+        accent = _hex_to_rgb(colors.get("accent", ""))
+
+        biome_colors = BiomeColors(
+            ground=ground,
+            ground_alt=_tint(ground, 12),
+            wall=wall,
+            accent=accent,
+            decoration=_tint(accent, 18),
+        )
+
+        return BiomeData(
+            name=biome_name,
+            description=f"Exploring the {biome_name} biome.",
+            colors=biome_colors,
+            encounter_rate=0.12,
+            enemies=["Wanderer", "Bandit", "Beast"],
+            resources=["Relic Shards", "Herbs", "Minerals"],
+        )
+
+    return None
+
+
 def get_biome_data(biome_name: str) -> BiomeData:
     # Convert "forest" -> "Forest", "prism_reef" -> "Prism Reef"
     formatted = biome_name.replace("_", " ").title()
-    return BIOME_PRESETS.get(formatted, BIOME_PRESETS["Forest"])
+    if formatted in BIOME_PRESETS:
+        return BIOME_PRESETS[formatted]
+
+    from_maps = _biome_from_map_generator(formatted)
+    if from_maps:
+        return from_maps
+
+    return BIOME_PRESETS["Forest"]
 
 
 @dataclass
@@ -363,7 +424,11 @@ class OpenWorldPygame:
 
         self.base_path = Path(__file__).parent
         maps_path = self.base_path / "maps"
-        map_path = maps_path / map_file
+        map_path = Path(map_file)
+        if not map_path.is_absolute():
+            map_path = self.base_path / map_file
+        if not map_path.exists():
+            map_path = maps_path / map_file
 
         biome = get_biome_data(biome_name)
 
