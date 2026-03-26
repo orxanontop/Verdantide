@@ -20,42 +20,52 @@ def draw_gradient_background(screen: pygame.Surface):
         (35, 20, 50),
     ]
     
-    step_height = SCREEN_HEIGHT // (len(colors) - 1)
+    width, height = screen.get_size()
+    step = height / (len(colors) - 1)
     
     for i in range(len(colors) - 1):
-        y1 = i * step_height
-        y2 = min((i + 1) * step_height, SCREEN_HEIGHT)
+        y1 = int(i * step)
+        y2 = int((i + 1) * step) if i < len(colors) - 2 else height
+        if y2 <= y1:
+            continue
         
         for y in range(y1, y2):
             t = (y - y1) / (y2 - y1)
             r = int(colors[i][0] + (colors[i + 1][0] - colors[i][0]) * t)
             g = int(colors[i][1] + (colors[i + 1][1] - colors[i][1]) * t)
             b = int(colors[i][2] + (colors[i + 1][2] - colors[i][2]) * t)
-            pygame.draw.line(screen, (r, g, b), (0, y), (SCREEN_WIDTH, y))
+            pygame.draw.line(screen, (r, g, b), (0, y), (width, y))
 
 
 def draw_mountains(screen: pygame.Surface):
-    pygame.draw.polygon(screen, (30, 15, 45), [
+    width, height = screen.get_size()
+    sx = width / SCREEN_WIDTH
+    sy = height / SCREEN_HEIGHT
+
+    def scale(points: list[tuple[int, int]]) -> list[tuple[int, int]]:
+        return [(int(x * sx), int(y * sy)) for x, y in points]
+
+    pygame.draw.polygon(screen, (30, 15, 45), scale([
         (0, SCREEN_HEIGHT),
         (150, SCREEN_HEIGHT - 200),
         (300, SCREEN_HEIGHT - 350),
         (450, SCREEN_HEIGHT - 150),
         (600, SCREEN_HEIGHT),
-    ])
+    ]))
     
-    pygame.draw.polygon(screen, (25, 12, 40), [
+    pygame.draw.polygon(screen, (25, 12, 40), scale([
         (400, SCREEN_HEIGHT),
         (550, SCREEN_HEIGHT - 180),
         (700, SCREEN_HEIGHT - 320),
         (850, SCREEN_HEIGHT - 220),
         (960, SCREEN_HEIGHT),
-    ])
+    ]))
     
-    pygame.draw.polygon(screen, (20, 10, 35), [
+    pygame.draw.polygon(screen, (20, 10, 35), scale([
         (800, SCREEN_HEIGHT),
         (880, SCREEN_HEIGHT - 120),
         (960, SCREEN_HEIGHT),
-    ])
+    ]))
 
 
 class TextButton:

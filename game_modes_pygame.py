@@ -26,7 +26,7 @@ class BattleController(Protocol):
 class GameStateManager:
     """Manages game state across open world and battle modes."""
     
-    def __init__(self):
+    def __init__(self, map_file: str = "maps/forest.lua", biome_name: str = "Forest"):
         self.player_name: str = "Hero"
         self.player_element: str = "Fire"
         self.player_hp: int = 100
@@ -34,6 +34,8 @@ class GameStateManager:
         self.player_sp: int = 50
         self.player_max_sp: int = 50
         self.world_position: tuple[float, float] = (960, 960)
+        self.current_map: str = map_file
+        self.current_biome: str = biome_name
     
     def save_from_battle(self, player) -> None:
         """Save player state from battle end."""
@@ -73,7 +75,7 @@ class OpenWorldBattleGame:
         self.screen = pygame.display.set_mode((screen_width, screen_height))
         self.clock = pygame.time.Clock()
         
-        self.state = GameStateManager()
+        self.state = GameStateManager(map_file, biome_name)
         
         self.current_mode: str = "openworld"
         self.running: bool = True
@@ -83,6 +85,7 @@ class OpenWorldBattleGame:
         self._openworld = None
         self._battle_root = None
         self._battle_app = None
+        self._battle_ui = None
         
         self._initialize_openworld(screen_width, screen_height, map_file, biome_name)
     
@@ -122,7 +125,6 @@ class OpenWorldBattleGame:
     def _start_battle(self) -> None:
         """Switch to battle mode."""
         self.current_mode = "battle"
-        self.running = False
         
         pygame.quit()
         
@@ -131,6 +133,9 @@ class OpenWorldBattleGame:
         
         self._battle_root = tk.Tk()
         self._battle_root.title("Battle!")
+        self._battle_root.geometry("960x640")
+        self._battle_root.minsize(960, 640)
+        self._battle_root.bind("<Escape>", lambda e: self._battle_root.destroy())
         
         enemies_data = []
         try:
@@ -150,44 +155,57 @@ class OpenWorldBattleGame:
         self._battle_ui = BattleUI(self._battle_root)
         self._battle_ui.pack(fill="both", expand=True)
         
-        original_restart = self._battle_ui._restart_battle
+        # Set callback to close window when player wins
+        def on_victory():
+            self._battle_root.destroy()
         
-        def on_battle_end():
-            original_restart()
-            self._return_to_openworld()
-        
-        self._battle_ui._restart_battle = on_battle_end
+        self._battle_ui._on_battle_end_callback = on_victory
         
         self._battle_ui.start_battle(player, make_enemy_from_template(enemy_tpl))
         
         self._battle_root.mainloop()
+        
+        # After Tkinter window closes, return to openworld
+        self._return_to_openworld()
     
     def _return_to_openworld(self) -> None:
         """Return to open world after battle."""
         try:
-            player = self._battle_ui.engine.get("player")
-            self.state.save_from_battle(player)
+            if self._battle_ui and hasattr(self._battle_ui, 'engine'):
+                player = self._battle_ui.engine.get("player")
+                self.state.save_from_battle(player)
         except:
             pass
         
-        self._battle_root.destroy()
+        if self._battle_root:
+            try:
+                self._battle_root.destroy()
+            except:
+                pass
         self._battle_root = None
         self._battle_ui = None
         
-        self.__init__(
-            screen_width=960,
-            screen_height=640,
-            map_file="justamap3.lua",
-            biome_name="Forest"
-        )
-        self.state.world_position = self.state.world_position
+        # Reinitialize pygame and openworld
+        pygame.init()
+        pygame.display.set_caption("Verdantide")
+        self.screen = pygame.display.set_mode((960, 640))
+        
+        # Get current map and biome from state
+        map_file = getattr(self.state, 'current_map', 'maps/forest.lua')
+        biome = getattr(self.state, 'current_biome', 'Forest')
+        
+        # Store position before reinitializing
+        saved_x = self.state.world_position[0]
+        saved_y = self.state.world_position[1]
+        
+        self._initialize_openworld(960, 640, map_file, biome)
+        
+        # Restore player position after initializing
+        self._openworld.player.x = saved_x
+        self._openworld.player.y = saved_y
         
         self.current_mode = "openworld"
         self.running = True
-        
-        if hasattr(self, '_openworld') and self._openworld:
-            self._openworld.player.x = self.state.world_position[0]
-            self._openworld.player.y = self.state.world_position[1]
     
     def start(self) -> None:
         """Start the game loop."""

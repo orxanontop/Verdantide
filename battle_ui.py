@@ -595,6 +595,12 @@ class BattleUI(ttk.Frame):
         self._player_sprite: int | None = None
         self._enemy_sprite: int | None = None
 
+        # Callback for when battle ends (to return to openworld)
+        self._on_battle_end_callback = None
+
+        # Bind Escape key to close skill menu
+        self.bind("<Escape>", lambda e: self._close_menus())
+
         # particle state
         self._particles: list[int] = []
         self._particle_job: str | None = None
@@ -634,11 +640,9 @@ class BattleUI(ttk.Frame):
         self.timeline = InitiativeBar(top, theme=self.theme, content=self.content, width=420, height=42)
         self.timeline.grid(row=1, column=1, sticky="e", padx=(10, 0), pady=(10, 0))
 
-        # MID: arena
+        # MID: arena - responsive canvas
         self.arena = tk.Canvas(
             self,
-            width=900,
-            height=380,
             bg=self.theme["bg"],
             highlightthickness=1,
             highlightbackground=self.theme["panel_border"],
@@ -665,7 +669,6 @@ class BattleUI(ttk.Frame):
             font=("Segoe UI", 10, "bold"),
             anchor="w",
             justify="left",
-            wraplength=900,
         )
         self.hint.grid(row=2, column=0, sticky="ew", pady=(8, 0))
 
@@ -742,6 +745,7 @@ class BattleUI(ttk.Frame):
         self.menu_overlay = tk.Frame(bottom, bg=self.theme["bg"])
         self.menu_overlay.grid(row=5, column=0, sticky="ew")
         self.menu_overlay.columnconfigure(0, weight=1)
+        self.menu_overlay.grid_remove()
 
         self.skill_menu: tk.Frame | None = None
         self.item_menu: tk.Frame | None = None
@@ -749,6 +753,18 @@ class BattleUI(ttk.Frame):
 
         self._draw_arena_background()
         self._spawn_particles()
+
+        # Bind resize event for responsive elements
+        self.bind("<Configure>", self._on_resize)
+
+    def _on_resize(self, event):
+        """Handle window resize to make elements responsive."""
+        width = event.width
+        # Update wraplength for hint
+        self.hint.configure(wraplength=width - 32)
+        # Redraw arena
+        if hasattr(self, '_draw_arena_background'):
+            self._draw_arena_background()
 
     # -----------------------------
     # Battle start / wiring
@@ -1058,11 +1074,23 @@ class BattleUI(ttk.Frame):
                 w.destroy()
         self.skill_menu = None
         self.item_menu = None
+        try:
+            self.menu_overlay.grid_remove()
+        except Exception:
+            pass
 
     def _open_skill_menu(self) -> None:
         if self._busy or self.engine.active_id != "player":
             return
+        # Toggle skill menu - if already open, close it
+        if self.skill_menu is not None:
+            self._close_menus()
+            return
         self._close_menus()
+        try:
+            self.menu_overlay.grid()
+        except Exception:
+            pass
 
         actor = self.engine.get("player")
 
@@ -1172,7 +1200,15 @@ class BattleUI(ttk.Frame):
     def _open_item_menu(self) -> None:
         if self._busy or self.engine.active_id != "player":
             return
+        # Toggle item menu - if already open, close it
+        if self.item_menu is not None:
+            self._close_menus()
+            return
         self._close_menus()
+        try:
+            self.menu_overlay.grid()
+        except Exception:
+            pass
 
         actor = self.engine.get("player")
         p_count = int(actor.items.get("potion", 0))
@@ -1520,8 +1556,16 @@ class BattleUI(ttk.Frame):
             if self.engine.is_over():
                 winner = self.engine.winner_team()
                 if winner:
-                    self.log.line("Restarting battle in 3 seconds...", tag="system")
-                    self.after(3000, self._restart_battle)
+                    # If player won, close battle and return to openworld
+                    if winner == "player":
+                        self.log.line("Victory! Returning to world...", tag="system")
+                        if self._on_battle_end_callback:
+                            self.after(1500, self._on_battle_end_callback)
+                        else:
+                            self.after(1500, self.quit)
+                    else:
+                        self.log.line("Defeat! Restarting...", tag="system")
+                        self.after(3000, self._restart_battle)
                 return
             
             self._set_controls_enabled(self.engine.active_id == "player" and not self.engine.is_over())
